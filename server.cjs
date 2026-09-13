@@ -101,9 +101,15 @@ try {
 
 try {
   fs.accessSync(pocketbaseBinary, fs.constants.X_OK);
-  console.log('pocketbase binary executable (X_OK) check: PASS');
+  console.log('pocketbase binary executable (X_OK) check, BEFORE chmod: PASS');
 } catch (error) {
-  console.error('pocketbase binary executable (X_OK) check: FAIL —', error.code, error.message);
+  // Expected and harmless on most deploys: a fresh checkout/extract on
+  // Hostinger routinely loses the executable bit, and the chmodSync() right
+  // below exists specifically to restore it before PocketBase is ever
+  // spawned. This line alone is NOT evidence of an unresolved problem — see
+  // the AFTER-chmod re-check further down, which is the one that actually
+  // matters.
+  console.error('pocketbase binary executable (X_OK) check, BEFORE chmod: FAIL —', error.code, error.message);
 }
 
 // Hostinger runs Linux. Ensure the PocketBase binary is executable.
@@ -112,6 +118,18 @@ try {
   console.log('chmod 0755 on pocketbase binary: OK');
 } catch (error) {
   console.error('Failed to set PocketBase executable permission:', error.code, error.message);
+}
+
+// Re-check AFTER the chmod attempt — this is the check that actually matters.
+// If this still fails, chmod is not the fix: the most likely remaining cause
+// is the hosting account mounting this directory with a `noexec` restriction
+// (common on some restricted/shared plans), which no permission bits can
+// override — the binary would need to live on a mount that allows execution.
+try {
+  fs.accessSync(pocketbaseBinary, fs.constants.X_OK);
+  console.log('pocketbase binary executable (X_OK) check, AFTER chmod: PASS');
+} catch (error) {
+  console.error('pocketbase binary executable (X_OK) check, AFTER chmod: STILL FAILING —', error.code, error.message, '| this points to a filesystem/mount restriction (e.g. noexec) that chmod cannot fix, not a simple missing-permission-bit issue.');
 }
 
 // Prove the filesystem actually allows creating/writing pb_data at this
@@ -511,7 +529,25 @@ process.on('SIGINT', () => shutdown('SIGINT'));
   // migrations) — so this goes through ensurePocketbaseRunning(), which is
   // guarded by a real cross-process lock (see above) rather than spawning
   // directly here.
-  await ensurePocketbaseRunning();
+  //
+  // Deliberately NOT awaited here. ensurePocketbaseRunning() can legitimately
+  // take up to ~60s: acquiring the cross-process lock, then (per its own
+  // "Hold the lock until PocketBase is actually confirmed healthy" comment)
+  // blocking for up to another 60 one-second retries while PocketBase's
+  // first-boot migrations run. `await`-ing it right here — as this used to
+  // do, despite Step 2's own comment already saying app.listen() must not be
+  // gated on PocketBase readiness — defeated that intent completely: it made
+  // Step 2 wait for the exact same up-to-60s window before ever calling
+  // listen(), which is what actually produced Hostinger's "App did not call
+  // listen() within 3 seconds" supervisor timeout (seen in production
+  // together with a PocketBase spawn permission failure that kept it from
+  // ever becoming healthy, so the wait ran the full 60s every time). The
+  // lock inside ensurePocketbaseRunning() already makes concurrent callers
+  // (this one, Step 3's self-healing retry, and the Step 4 watchdog) safe
+  // to run independently, so nothing here needs to wait for it to finish.
+  ensurePocketbaseRunning().catch((error) => {
+    console.error('ensurePocketbaseRunning() failed:', error && error.stack ? error.stack : error);
+  });
 
   // --- Step 2: start the API immediately — do not gate app.listen() on ---
   // PocketBase readiness. Hostinger's process supervisor expects this app
