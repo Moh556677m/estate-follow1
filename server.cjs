@@ -183,21 +183,35 @@ function appendTail(current, chunk) {
   return next.length > STDERR_TAIL_LIMIT ? next.slice(next.length - STDERR_TAIL_LIMIT) : next;
 }
 
+// Set once the readiness module (apps/api/src/lib/pocketbaseReadiness.js) is
+// dynamically imported at the very start of the IIFE below — before that,
+// stays null and every checkHealth() call below just skips updating it
+// (safe: the module's own default is `false`, the correct state to start
+// in — the API's reverse proxy must never forward to PocketBase before it
+// has actually been confirmed healthy at least once).
+let setPocketbaseReadyFn = null;
+
 // Real health check against PocketBase's own /api/health endpoint. Used
-// both (a) BEFORE spawning, to detect an already-running healthy instance
-// so we never spawn a duplicate, and (b) to decide whether a PocketBase
-// exit (e.g. EADDRINUSE) is actually fatal or just means "someone else
-// already owns this port and it's healthy, so we're fine".
+// (a) BEFORE spawning, to detect an already-running healthy instance so we
+// never spawn a duplicate, (b) to decide whether a PocketBase exit (e.g.
+// EADDRINUSE) is actually fatal or just means "someone else already owns
+// this port and it's healthy, so we're fine", and (c) as the single source
+// of truth for the shared readiness flag the API's PocketBase reverse proxy
+// gates on — every call here updates it, so the proxy's view of "is
+// PocketBase up" can never drift stale from what this file itself believes.
 async function checkHealth(timeoutMs = 2000) {
+  let healthy = false;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(`${POCKETBASE_URL}/api/health`, { signal: controller.signal });
     clearTimeout(timer);
-    return res.ok;
+    healthy = res.ok;
   } catch {
-    return false;
+    healthy = false;
   }
+  if (setPocketbaseReadyFn) setPocketbaseReadyFn(healthy);
+  return healthy;
 }
 
 function spawnPocketbase() {
@@ -471,6 +485,12 @@ function shutdown(signal) {
 
   console.log(`Received ${signal}. Shutting down... (this is the HOST asking this instance to stop — normal during a redeploy/restart, not an error)`);
 
+  // Flip the shared readiness flag off immediately, so the reverse proxy
+  // stops forwarding to PocketBase (returning a clean 503 instead) the
+  // moment shutdown begins — before PocketBase is actually killed below,
+  // not after.
+  if (setPocketbaseReadyFn) setPocketbaseReadyFn(false);
+
   // Stop accepting NEW inbound connections immediately. server.close() takes
   // effect synchronously for new connections (its callback just waits for
   // in-flight ones to drain) — this is what stops the API from initiating
@@ -516,6 +536,21 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 (async () => {
+  // --- Step 0: load the shared PocketBase-readiness flag ------------------
+  // Must happen before anything below ever calls checkHealth() (Step 1
+  // does, immediately). server.cjs is CommonJS so this needs a dynamic
+  // import(); apps/api/src/main.js imports the same path normally — Node's
+  // ES module cache means both resolve to the exact same module instance.
+  try {
+    const readiness = await import('./apps/api/src/lib/pocketbaseReadiness.js');
+    setPocketbaseReadyFn = readiness.setPocketbaseReady;
+  } catch (error) {
+    console.error(
+      'Failed to load the PocketBase readiness module — the reverse proxy will keep returning 503 instead of forwarding to PocketBase:',
+      error && error.stack ? error.stack : error,
+    );
+  }
+
   // --- Step 1: is a healthy PocketBase already running? ------------------
   // On Hostinger (and similar managed Node hosts), a redeploy or restart
   // does not always guarantee the PREVIOUS instance of this app — and the

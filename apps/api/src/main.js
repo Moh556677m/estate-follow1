@@ -14,6 +14,7 @@ import { globalRateLimit } from './middleware/global-rate-limit.js';
 import logger from './utils/logger.js';
 import { BodyLimit } from './constants/common.js';
 import { initSentry } from './utils/sentry.js';
+import { isPocketbaseReady } from './lib/pocketbaseReadiness.js';
 
 // Sentry (backend error tracking) — no-op unless SENTRY_DSN is set in the
 // environment. Started before anything else so early errors are captured too.
@@ -107,6 +108,21 @@ function createPocketbaseProxy(target) {
     targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80);
 
   return (req, res) => {
+    // Gate on the shared readiness flag (apps/api/src/lib/pocketbaseReadiness.js,
+    // kept in sync by server.cjs's own health-check loop) BEFORE ever
+    // attempting to forward this request. This app's HTTP server starts
+    // accepting connections immediately on boot, deliberately not waiting
+    // for PocketBase to finish starting (see server.cjs's Step 2 comment) —
+    // without this check, any request arriving in that window reached this
+    // far and then failed with a raw "connect ECONNREFUSED 127.0.0.1:8090"
+    // from the client.request() call below, instead of a clean, temporary,
+    // retryable response.
+    if (!isPocketbaseReady()) {
+      res.set('Retry-After', '2');
+      res.status(503).json({ message: 'PocketBase is starting up — please retry in a moment.' });
+      return;
+    }
+
     const options = {
       hostname: targetUrl.hostname,
       port: targetPort,
