@@ -33,6 +33,7 @@ import { LanguageSwitcher } from '@/components/AppLayout';
 import pb from '@/lib/pocketbaseClient';
 import { registerSession } from '@/lib/sessions';
 import { finalizeSignup } from '@/lib/authApi';
+import { mirrorProfileToSupabase } from '@/lib/supabaseClient';
 import { trackReferralClick } from '@/lib/referralClient';
 import { verifyRecaptcha } from '@/lib/recaptcha';
 import { detectCountry } from '@/hooks/useGeoIp';
@@ -47,7 +48,7 @@ const OTP_DURATION = 300; // seconds (5 minutes)
 const OTP_LENGTH = 6;
 
 const SignupPage = () => {
-  const { isAuthed, bootstrapped } = useAuth();
+  const { isAuthed, bootstrapped, signup, verifySignupOtp, resendSignupOtp } = useAuth();
   const { t, isRtl } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -155,8 +156,10 @@ const SignupPage = () => {
     setSending(true);
     setError('');
     try {
-      const result = await pb.collection('users').requestOTP(form.email.trim());
-      setOtpId(result.otpId);
+      // Regular-user signup now goes straight to Supabase Auth — PocketBase
+      // is only involved afterwards, via the bridge in verifyOtp() below,
+      // once the email is actually confirmed.
+      await signup(form.email.trim(), form.password);
       setCode('');
       setSecondsLeft(OTP_DURATION);
       setOtpError('');
@@ -164,25 +167,10 @@ const SignupPage = () => {
       setVerified(false);
       setOtpOpen(true);
     } catch (err) {
-      const msg = String(err?.response?.message || err?.message || '').toLowerCase();
-      if (
-        msg.includes('could not send') ||
-        msg.includes('not configured') ||
-        msg.includes('email service') ||
-        err?.status === 500
-      ) {
-        // The verification email could not be sent (Resend misconfigured /
-        // domain not verified / transport error). Surface it clearly instead
-        // of opening the OTP modal for a code that was never delivered.
-        setError(t('otp_send_failed'));
-      } else if (msg.includes('already registered')) {
+      if (err?.code === 'ACCOUNT_EXISTS') {
         setError(t('account_exists'));
       } else {
-        // Show the real server message when there is one (e.g. a schema
-        // validation failure while creating the signup placeholder record)
-        // instead of always collapsing every unrecognized error into the
-        // same generic "something went wrong" with no way to diagnose it.
-        setError(err?.response?.message || err?.message || t('something_wrong'));
+        setError(err?.message || t('something_wrong'));
       }
     } finally {
       setSending(false);
@@ -218,25 +206,12 @@ const SignupPage = () => {
     setOtpError('');
     setOtpInfo('');
     try {
-      const result = await pb.collection('users').requestOTP(form.email.trim());
-      setOtpId(result.otpId);
+      await resendSignupOtp(form.email.trim());
       setCode('');
       setSecondsLeft(OTP_DURATION);
       setOtpInfo(t('otp_resend_sent'));
     } catch (err) {
-      const msg = String(err?.response?.message || err?.message || '').toLowerCase();
-      if (
-        msg.includes('could not send') ||
-        msg.includes('not configured') ||
-        msg.includes('email service') ||
-        err?.status === 500
-      ) {
-        setOtpError(t('otp_send_failed'));
-      } else if (msg.includes('already registered')) {
-        setOtpError(t('account_exists'));
-      } else {
-        setOtpError(err?.response?.message || err?.message || t('something_wrong'));
-      }
+      setOtpError(err?.message || t('something_wrong'));
     } finally {
       setResending(false);
     }
@@ -254,24 +229,6 @@ const SignupPage = () => {
     setVerified(true);
     setOtpError('');
     try {
-      // Refresh the auth record so routing sees account_type (broker/company/owner).
-      try {
-        const refreshed = await pb.collection('users').authRefresh();
-        // Ensure local store carries account_type even if a stale cache lingered.
-        if (refreshed?.record && form.account_type && !refreshed.record.account_type) {
-          try {
-            await pb.collection('users').update(refreshed.record.id, {
-              account_type: form.account_type,
-              profile_complete: form.account_type === 'owner',
-            });
-            await pb.collection('users').authRefresh();
-          } catch {
-            /* non-fatal */
-          }
-        }
-      } catch {
-        /* non-fatal */
-      }
       // Register this device as an active session.
       try {
         await registerSession();
@@ -305,35 +262,36 @@ const SignupPage = () => {
     }
     setVerifying(true);
     try {
-      // 1) Verify the OTP — authenticates the placeholder user (email proven).
-      await pb.collection('users').authWithOTP(otpId, entered);
+      // 1) Verify the Supabase signup code — this both proves the email and
+      //    returns a real Supabase session, which verifySignupOtp() bridges
+      //    into a real PocketBase session (pb.authStore) in one step.
+      await verifySignupOtp(form.email.trim(), entered);
 
-      // 2) Finalise the account server-side. The password MUST be set inside
-      //    PocketBase (the REST API rejects password changes without
-      //    oldPassword, and we never know the placeholder's random password).
-      //    This keeps the stable User ID and never recreates the account.
+      // 2) Commit the profile fields the signup form collected (name,
+      //    nationality, gender, phone, referral) onto that same PocketBase
+      //    record. No password here — Supabase owns the real password now;
+      //    finalize-signup.pb.js treats password as optional for exactly
+      //    this case (see its own comment).
       await finalizeSignup({
         name: form.name.trim(),
         nationality: form.nationality,
         gender: form.gender,
         phone: form.phone,
-        password: form.password,
-        passwordConfirm: form.confirmPassword,
         account_type: form.account_type || 'owner',
         referred_by: referredBy || '',
       });
       try { localStorage.removeItem('ef_ref'); } catch { /* ignore */ }
+      mirrorProfileToSupabase(pb.authStore.record);
       await completeSignup();
     } catch (err) {
       setVerifying(false);
+      if (err?.code === 'OTP_INVALID') {
+        setOtpError(t('otp_invalid'));
+        return;
+      }
       const msg = String(err?.response?.message || err?.message || '');
       const lower = msg.toLowerCase();
-      // Only a genuine OTP failure should tell the user their CODE is wrong.
-      // This used to also fire for ANY 400 response — including a real
-      // finalize-signup validation error (e.g. a bad password or the
-      // "nationality/gender required" placeholder bug) — which misled users
-      // into re-entering a code that was actually correct.
-      if (lower.includes('otp') || lower.includes('expired')) {
+      if (lower.includes('otp') || lower.includes('expired') || lower.includes('token')) {
         setOtpError(t('otp_invalid'));
       } else {
         setOtpError(msg || t('something_wrong'));

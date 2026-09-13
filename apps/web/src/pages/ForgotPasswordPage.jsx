@@ -20,8 +20,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { LanguageSwitcher } from '@/components/AppLayout';
-import pb from '@/lib/pocketbaseClient';
 import { verifyRecaptcha } from '@/lib/recaptcha';
 
 const OTP_DURATION = 300; // 5 minutes
@@ -29,6 +29,7 @@ const OTP_DURATION = 300; // 5 minutes
 const ForgotPasswordPage = () => {
   const { t, isRtl } = useLanguage();
   const navigate = useNavigate();
+  const { requestPasswordReset, resendPasswordResetOtp, verifyPasswordResetOtp, completePasswordReset } = useAuth();
 
   const [step, setStep] = useState('email'); // email | otp | password | done
   const accountType = 'owner';
@@ -65,31 +66,18 @@ const ForgotPasswordPage = () => {
     setSending(true);
     setEmailError('');
     try {
-      const result = await pb
-        .collection('users')
-        .requestOTP(email.trim(), { body: { email: email.trim(), mode: 'reset' } });
-      setOtpId(result.otpId);
+      // Supabase's resetPasswordForEmail() deliberately never reveals
+      // whether the address is actually registered (avoids account
+      // enumeration) — it always "succeeds" from the caller's point of
+      // view, so there is no more "no account found" branch to handle here.
+      await requestPasswordReset(email.trim());
       setCode(['', '', '', '', '', '']);
       setSecondsLeft(OTP_DURATION);
       setOtpError('');
       setOtpInfo(t('code_sent'));
       setStep('otp');
     } catch (err) {
-      const msg = (err?.response?.message || err?.message || '').toLowerCase();
-      if (
-        msg.includes('could not send') ||
-        msg.includes('not configured') ||
-        msg.includes('email service') ||
-        err?.status === 500
-      ) {
-        // The reset code could not be sent — surface it instead of moving to
-        // the OTP step for a code that was never delivered.
-        setEmailError(t('otp_send_failed'));
-      } else if (msg.includes('no account') || msg.includes('not registered') || err?.status === 400) {
-        setEmailError(t('no_account_found'));
-      } else {
-        setEmailError(t('something_wrong'));
-      }
+      setEmailError(err?.message || t('something_wrong'));
     } finally {
       setSending(false);
     }
@@ -129,27 +117,12 @@ const ForgotPasswordPage = () => {
     setOtpError('');
     setOtpInfo('');
     try {
-      const result = await pb
-        .collection('users')
-        .requestOTP(email.trim(), { body: { email: email.trim(), mode: 'reset' } });
-      setOtpId(result.otpId);
+      await resendPasswordResetOtp(email.trim());
       setCode(['', '', '', '', '', '']);
       setSecondsLeft(OTP_DURATION);
       setOtpInfo(t('otp_resend_sent'));
     } catch (err) {
-      const msg = (err?.response?.message || err?.message || '').toLowerCase();
-      if (
-        msg.includes('could not send') ||
-        msg.includes('not configured') ||
-        msg.includes('email service') ||
-        err?.status === 500
-      ) {
-        setOtpError(t('otp_send_failed'));
-      } else if (msg.includes('no account') || msg.includes('not registered')) {
-        setOtpError(t('no_account_found'));
-      } else {
-        setOtpError(t('something_wrong'));
-      }
+      setOtpError(err?.message || t('something_wrong'));
     } finally {
       setResending(false);
     }
@@ -177,32 +150,16 @@ const ForgotPasswordPage = () => {
     }
     setVerifying(true);
     try {
-      // Authenticates the user (email proven). We then set a new password.
-      await pb.collection('users').authWithOTP(otpId, entered);
-
-      // Enforce the selected account type — not just a visual change.
-      const rec = pb.authStore.record;
-      const isStaff =
-        !!rec?.is_super_admin ||
-        ['admin', 'editor', 'support', 'custom'].includes(rec?.role);
-      if (!isStaff) {
-        const actual = String(rec?.account_type || 'owner').toLowerCase();
-        if (actual !== accountType) {
-          pb.authStore.clear();
-          setStep('email');
-          setEmailError(t('err_account_type_mismatch'));
-          setVerifying(false);
-          return;
-        }
-      }
-
+      // Opens a temporary Supabase "recovery" session — proves the code is
+      // correct, just enough to set a new password next. Not a real
+      // sign-in: no PocketBase bridging happens here.
+      await verifyPasswordResetOtp(email.trim(), entered);
       setStep('password');
     } catch (err) {
-      const msg = (err?.response?.message || err?.message || '').toLowerCase();
-      if (msg.includes('expired') || msg.includes('invalid') || err?.status === 400) {
+      if (err?.code === 'OTP_INVALID') {
         setOtpError(t('otp_invalid'));
       } else {
-        setOtpError(t('something_wrong'));
+        setOtpError(err?.message || t('something_wrong'));
       }
     } finally {
       setVerifying(false);
@@ -222,21 +179,10 @@ const ForgotPasswordPage = () => {
     }
     setResetting(true);
     try {
-      const uid = pb.authStore.record?.id;
-      if (!uid) {
-        setPwError(t('something_wrong'));
-        setResetting(false);
-        return;
-      }
-      await pb.collection('users').update(uid, {
-        password: newPassword,
-        passwordConfirm: confirmPassword,
-      });
-      // Clear the temporary OTP session — user must sign in again.
-      pb.authStore.clear();
+      await completePasswordReset(newPassword);
       setStep('done');
     } catch (err) {
-      setPwError(t('something_wrong'));
+      setPwError(err?.message || t('something_wrong'));
     } finally {
       setResetting(false);
     }

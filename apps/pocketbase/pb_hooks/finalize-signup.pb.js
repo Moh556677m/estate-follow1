@@ -43,11 +43,19 @@ routerAdd(
     // the count only increments when the referred account is later approved.
     const referredBy = String(body.referred_by || body['referred_by'] || '').trim();
 
-    if (!password || password.length < 10) {
-      throw new BadRequestError('Password must be at least 10 characters.');
-    }
-    if (password !== passwordConfirm) {
-      throw new BadRequestError('Passwords do not match.');
+    // Password is OPTIONAL here: a Supabase-bridged account (see
+    // apps/api/src/routes/supabase-auth-bridge.js) never logs into
+    // PocketBase directly — its PocketBase password is a random throwaway
+    // set once at bridge time and never used again, so there is nothing
+    // useful to "finalize" here for that case. The legacy PocketBase-OTP
+    // signup flow still sends a real password and gets it set as before.
+    if (password || passwordConfirm) {
+      if (!password || password.length < 10) {
+        throw new BadRequestError('Password must be at least 10 characters.');
+      }
+      if (password !== passwordConfirm) {
+        throw new BadRequestError('Passwords do not match.');
+      }
     }
     if (gender && gender !== 'male' && gender !== 'female') {
       throw new BadRequestError('Invalid gender value.');
@@ -65,8 +73,11 @@ routerAdd(
       throw new BadRequestError('Account not found. Please restart the registration.');
     }
 
-    // Set the real password server-side (no oldPassword needed here).
-    rec.setPassword(password);
+    // Set the real password server-side (no oldPassword needed here) — only
+    // when one was actually provided (see comment above).
+    if (password) {
+      rec.setPassword(password);
+    }
 
     // Commit profile fields. Only overwrite what was provided.
     if (name) rec.set('name', name);

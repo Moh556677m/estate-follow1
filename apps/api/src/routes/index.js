@@ -14,6 +14,7 @@ import portfolioAdvisorRouter from './portfolio-advisor.js';
 import documentSharesRouter from './document-shares.js';
 import siteIssuesRouter from './site-issues.js';
 import supabaseDiagnosticsRouter from './supabase-diagnostics.js';
+import supabaseAuthBridgeRouter from './supabase-auth-bridge.js';
 
 const router = Router();
 
@@ -51,6 +52,11 @@ export default () => {
     // Supabase migration — Super-Admin-only diagnostic (see file header for
     // why this exists and what it does/doesn't touch).
     router.use('/supabase-diagnostics', supabaseDiagnosticsRouter);
+    // Supabase Auth -> PocketBase session bridge (regular users only — admin
+    // auth is untouched). Deliberately public: the caller proves identity
+    // with a Supabase access token, not a PocketBase one. See the file
+    // header for the full explanation.
+    router.use('/auth/bridge', supabaseAuthBridgeRouter);
 
     return router;
 };

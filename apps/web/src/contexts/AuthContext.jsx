@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import pb from '@/lib/pocketbaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
+import apiServerClient from '@/lib/apiServerClient';
 import {
   registerSession,
   checkSessionState,
@@ -164,6 +166,56 @@ async function ensureAccountType(record) {
   }
 }
 
+/**
+ * Map a Supabase Auth error to the same stable client codes classifyAuthError
+ * produces, so every existing caller (LoginPage/SignupPage/ForgotPasswordPage)
+ * keeps working against one consistent set of `.code` values regardless of
+ * which backend actually handled the request.
+ */
+function classifySupabaseError(err) {
+  if (!err) return authError('AUTH_ERROR', 'auth_error');
+  const msg = String(err?.message || '').toLowerCase();
+  if (msg.includes('invalid login credentials')) return authError('INVALID_CREDENTIALS', err.message);
+  if (msg.includes('email not confirmed')) return authError('ACCOUNT_PENDING', err.message);
+  if (msg.includes('already registered') || msg.includes('already been registered')) {
+    return authError('ACCOUNT_EXISTS', err.message);
+  }
+  if (msg.includes('rate limit')) return authError('AUTH_ERROR', err.message);
+  if (msg.includes('token has expired') || msg.includes('invalid') && msg.includes('otp')) {
+    return authError('OTP_INVALID', err.message);
+  }
+  return authError('AUTH_ERROR', err.message || 'auth_error');
+}
+
+/**
+ * Exchange a Supabase access token for a real PocketBase session (see
+ * apps/api/src/routes/supabase-auth-bridge.js for the full explanation of
+ * why this exists). On success, populates pb.authStore directly — every
+ * OTHER piece of this app that reads pb.authStore/useAuth().user keeps
+ * working completely unchanged, because as far as PocketBase is concerned
+ * this is a completely normal auth session.
+ */
+async function bridgeToPocketbase(supabaseAccessToken) {
+  const res = await apiServerClient.fetch('/auth/bridge', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${supabaseAccessToken}` },
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok || !data?.token || !data?.record) {
+    const err = new Error(data?.message || 'Could not start your session.');
+    err.status = res.status;
+    err.code = data?.message === 'ACCOUNT_SUSPENDED' ? 'ACCOUNT_SUSPENDED' : undefined;
+    throw err;
+  }
+  pb.authStore.save(data.token, data.record);
+  return data.record;
+}
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(pb.authStore.record);
   const [bootstrapped, setBootstrapped] = useState(!pb.authStore.isValid);
@@ -174,12 +226,45 @@ export const AuthProvider = ({ children }) => {
   // Refresh token + verify this device session. Never treat refresh failure as
   // "wrong password" — only clear when the server says the session was revoked.
   useEffect(() => {
-    if (!pb.authStore.isValid) {
-      setBootstrapped(true);
-      return;
-    }
-
     let cancelled = false;
+
+    // Regular users now authenticate via Supabase (see login() below) — its
+    // own session lives in its own storage, separate from pb.authStore. On a
+    // fresh page load with no PocketBase token yet (or one that has since
+    // expired), a still-valid Supabase session is the real signal that this
+    // browser is actually signed in — re-bridge it to get a fresh PocketBase
+    // token instead of treating this as "logged out". Skipped entirely when
+    // pb.authStore is ALREADY valid (an admin/staff session — pure
+    // PocketBase, no Supabase involved at all — or a regular user whose
+    // bridged token from earlier this tab session is still fresh), so this
+    // never disturbs that existing, working path.
+    const restoreFromSupabase = async () => {
+      if (pb.authStore.isValid || !isSupabaseConfigured) return false;
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data?.session?.access_token;
+        if (!token) return false;
+        const record = await bridgeToPocketbase(token);
+        if (cancelled) return true;
+        assertAccountAllowed(record);
+        setUser(record);
+        setBootstrapped(true);
+        return true;
+      } catch {
+        // No valid Supabase session, or bridging failed — fall through to
+        // the plain "not signed in" path below exactly as before.
+        return false;
+      }
+    };
+
+    if (!pb.authStore.isValid) {
+      restoreFromSupabase().then((restored) => {
+        if (!restored && !cancelled) setBootstrapped(true);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const refreshUser = async () => {
       try {
@@ -356,6 +441,13 @@ export const AuthProvider = ({ children }) => {
       // request came from, so staff/admin accounts and regular owner
       // accounts can be rejected server-side for using the wrong one —
       // not just via the client-side isStaff() check each page also does.
+      // `portal` tells this function (and, for the admin path, the
+      // PocketBase-side login hook — pb_hooks/portal-login-separation.pb.js)
+      // which login page this request came from. Admin/staff auth is
+      // completely untouched: pure PocketBase, exactly as before. Regular
+      // users ('user', the default) now authenticate via Supabase Auth
+      // directly — PocketBase still powers everything else (properties,
+      // payments, documents, ...), reached via the auth bridge below.
       login: async (email, password, { portal = 'user' } = {}) => {
         const normalized = normalizeEmail(email);
         const pass = String(password ?? '');
@@ -364,66 +456,185 @@ export const AuthProvider = ({ children }) => {
           throw authError('INVALID_CREDENTIALS');
         }
 
-        let result;
-        try {
-          result = await pb.collection('users').authWithPassword(normalized, pass, {
-            requestKey: `login-${normalized}-${Date.now()}`,
-            headers: { 'X-Portal': portal },
-          });
-        } catch (err) {
-          throw classifyAuthError(err);
+        if (portal === 'admin') {
+          let result;
+          try {
+            result = await pb.collection('users').authWithPassword(normalized, pass, {
+              requestKey: `login-${normalized}-${Date.now()}`,
+              headers: { 'X-Portal': portal },
+            });
+          } catch (err) {
+            throw classifyAuthError(err);
+          }
+
+          let record = result?.record || pb.authStore.record;
+          try {
+            assertAccountAllowed(record);
+          } catch (statusErr) {
+            pb.authStore.clear();
+            setUser(null);
+            throw statusErr;
+          }
+
+          try {
+            record = (await ensureAccountType(record)) || record;
+          } catch {
+            /* keep record */
+          }
+
+          setUser(record);
+
+          try {
+            await registerSession();
+          } catch (err) {
+            const mapped = mapSessionError(err);
+            if (mapped?.code === 'MAX_SESSIONS' || mapped?.code === 'MAX_DEVICES') {
+              pb.authStore.clear();
+              setUser(null);
+              throw authError('MAX_SESSIONS', mapped.message);
+            }
+            console.warn('session register soft-fail', mapped);
+          }
+
+          return result;
         }
 
-        let record = result?.record || pb.authStore.record;
+        // --- Regular user: Supabase Auth, bridged to a real PocketBase
+        // session so the rest of the app needs no other changes. ---
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: normalized,
+          password: pass,
+        });
+        if (error) throw classifySupabaseError(error);
+
+        let record;
+        try {
+          record = await bridgeToPocketbase(data.session.access_token);
+        } catch (bridgeErr) {
+          await supabase.auth.signOut().catch(() => {});
+          throw bridgeErr?.code ? bridgeErr : authError('AUTH_ERROR', bridgeErr?.message);
+        }
+
         try {
           assertAccountAllowed(record);
         } catch (statusErr) {
           pb.authStore.clear();
+          await supabase.auth.signOut().catch(() => {});
           setUser(null);
           throw statusErr;
         }
 
-        try {
-          record = (await ensureAccountType(record)) || record;
-        } catch {
-          /* keep record */
-        }
-
         setUser(record);
 
-        // Session registration is independent of credential validity.
-        // Only MAX_SESSIONS may undo a successful password login.
         try {
           await registerSession();
         } catch (err) {
           const mapped = mapSessionError(err);
           if (mapped?.code === 'MAX_SESSIONS' || mapped?.code === 'MAX_DEVICES') {
             pb.authStore.clear();
+            await supabase.auth.signOut().catch(() => {});
             setUser(null);
             throw authError('MAX_SESSIONS', mapped.message);
           }
-          // Soft-fail everything else (network, validation, race) — user stays in.
           console.warn('session register soft-fail', mapped);
         }
 
-        return result;
+        return { record };
       },
-      signup: async (email, password, extraFields = {}) => {
-        const normalized = normalizeEmail(email);
-        const body =
-          extraFields instanceof FormData
-            ? extraFields
-            : {
-                email: normalized,
-                password,
-                passwordConfirm: password,
-                ...extraFields,
-              };
-        if (body instanceof FormData) {
-          body.set('email', normalized);
+      // Regular-user signup only (admin/staff accounts are created from the
+      // admin panel directly against PocketBase — unrelated to this). Sends
+      // Supabase's own signup confirmation email (configure that project's
+      // "Confirm signup" email template to send a {{ .Token }} OTP code to
+      // keep the existing 6-digit-code UI in SignupPage.jsx working, or a
+      // {{ .ConfirmationURL }} link if the OTP screen is dropped instead).
+      signup: async (email, password) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
         }
-        await pb.collection('users').create(body);
-        return pb.collection('users').authWithPassword(normalized, password);
+        const normalized = normalizeEmail(email);
+        const pass = String(password ?? '');
+        if (!normalized || !pass) throw authError('INVALID_CREDENTIALS');
+        const { data, error } = await supabase.auth.signUp({ email: normalized, password: pass });
+        if (error) throw classifySupabaseError(error);
+        return data;
+      },
+      // Verifies the signup confirmation code and completes sign-in in one
+      // step (Supabase returns a real session from a successful verifyOtp).
+      verifySignupOtp: async (email, token) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const normalized = normalizeEmail(email);
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: normalized,
+          token: String(token || '').trim(),
+          type: 'signup',
+        });
+        if (error) throw classifySupabaseError(error);
+        const record = await bridgeToPocketbase(data.session.access_token);
+        setUser(record);
+        try {
+          await registerSession();
+        } catch (err) {
+          console.warn('session register soft-fail', mapSessionError(err));
+        }
+        return record;
+      },
+      resendSignupOtp: async (email) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const { error } = await supabase.auth.resend({
+          type: 'signup',
+          email: normalizeEmail(email),
+        });
+        if (error) throw classifySupabaseError(error);
+      },
+      // Forgot / reset password — regular users only, entirely via Supabase.
+      requestPasswordReset: async (email) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email));
+        if (error) throw classifySupabaseError(error);
+      },
+      resendPasswordResetOtp: async (email) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email));
+        if (error) throw classifySupabaseError(error);
+      },
+      // Verifies the reset code — this opens a temporary Supabase "recovery"
+      // session (not bridged/signed-in yet) just enough to allow setting a
+      // new password next.
+      verifyPasswordResetOtp: async (email, token) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const normalized = normalizeEmail(email);
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: normalized,
+          token: String(token || '').trim(),
+          type: 'recovery',
+        });
+        if (error) throw classifySupabaseError(error);
+        return data;
+      },
+      // Sets the new password on the temporary recovery session opened by
+      // verifyPasswordResetOtp, then signs it out — the user signs in fresh
+      // afterwards with their new password, exactly like the old PocketBase
+      // OTP-reset flow did.
+      completePasswordReset: async (newPassword) => {
+        if (!isSupabaseConfigured) {
+          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        }
+        const { error } = await supabase.auth.updateUser({ password: String(newPassword || '') });
+        if (error) throw classifySupabaseError(error);
+        await supabase.auth.signOut().catch(() => {});
       },
       logout: async () => {
         try {
@@ -432,6 +643,13 @@ export const AuthProvider = ({ children }) => {
           /* ignore */
         }
         pb.authStore.clear();
+        if (isSupabaseConfigured) {
+          try {
+            await supabase.auth.signOut();
+          } catch {
+            /* ignore — a failed remote sign-out never blocks a local logout */
+          }
+        }
         setUser(null);
       },
       logoutAll: async () => {
@@ -441,6 +659,13 @@ export const AuthProvider = ({ children }) => {
           /* ignore */
         }
         pb.authStore.clear();
+        if (isSupabaseConfigured) {
+          try {
+            await supabase.auth.signOut();
+          } catch {
+            /* ignore */
+          }
+        }
         setUser(null);
       },
     }),
