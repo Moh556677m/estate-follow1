@@ -347,5 +347,20 @@ export function uploadErrorMessage(err, t) {
   }
   if (err.status === 401) return t ? t('upload_auth_retry') : 'Session expired — please retry.';
   if (err.status === 403) return t ? t('upload_forbidden') : 'Not allowed.';
+  // Every other status (400 validation, 404, 409, 422, 5xx, ...) used to
+  // always collapse into the generic "upload failed, try again" message,
+  // discarding PocketBase's own structured validation response — e.g.
+  // { data: { passport_file: { code, message } } } for a rejected mime
+  // type/size, or a top-level { message } for other failures. Surface the
+  // real reason when there is one.
+  const fieldErrors = err?.data?.data;
+  if (fieldErrors && typeof fieldErrors === 'object') {
+    const parts = Object.values(fieldErrors)
+      .map((info) => info?.message || info?.code)
+      .filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+  }
+  const topMessage = err?.data?.message;
+  if (topMessage && typeof topMessage === 'string') return topMessage;
   return t ? t('upload_error_generic') : 'Upload failed. Try again.';
 }

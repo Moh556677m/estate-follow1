@@ -268,6 +268,16 @@ export const AuthProvider = ({ children }) => {
 
     heartbeatRef.current = setInterval(() => {
       heartbeatSession().catch(() => {});
+      // Slide the real auth token forward too, not just the user_sessions
+      // "last_active" marker — heartbeatSession() only ever touched the
+      // latter, so a long but continuously active session (tab left open
+      // for hours) could still eventually hit the underlying PocketBase
+      // token's own expiry with nothing renewing it in between. Best-effort:
+      // a failure here is never surfaced or treated as a sign-out — the
+      // existing per-write ensureFreshToken()/withAuthRetry() safety net
+      // (apps/web/src/lib/authRefresh.js) still covers the case where this
+      // happens to fail right before a save.
+      pb.collection('users').authRefresh({ requestKey: `heartbeat-refresh-${Date.now()}` }).catch(() => {});
     }, HEARTBEAT_MS);
 
     // One immediate pulse after mount/login.

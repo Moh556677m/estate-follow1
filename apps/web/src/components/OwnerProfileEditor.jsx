@@ -93,6 +93,7 @@ const OwnerProfileEditor = () => {
   });
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarRemoved, setAvatarRemoved] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -141,6 +142,9 @@ const OwnerProfileEditor = () => {
   const set = (key) => (e) => setProfile((p) => ({ ...p, [key]: e.target.value }));
 
   // ---- File picking / validation -------------------------------------------
+  // Picking a photo uploads it immediately — no separate "Save" click
+  // needed, matching every other file picker on this page (identity
+  // documents already auto-upload on selection).
   const pickAvatar = async (e) => {
     const picked = e.target.files?.[0] || null;
     if (e.target) e.target.value = '';
@@ -151,10 +155,27 @@ const OwnerProfileEditor = () => {
       /\.(jpe?g|png|webp|svg|gif)$/i.test(picked.name || '');
     if (!okType) { setFileError(t('file_image_invalid_type')); return; }
     if (!picked.size) { setFileError(t('file_empty') || t('file_image_invalid_type')); return; }
-    // Compress the avatar before staging so the save upload is fast.
     const compressed = await compressImage(picked, { maxDim: 512, quality: 0.85 });
     setAvatarFile(compressed);
     setAvatarRemoved(false);
+    setAvatarUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('avatar', compressed);
+      const updated = await withAuthRetry(() =>
+        pb.collection('users').update(user.id, fd, {
+          requestKey: `profile-avatar-upload-${user.id}-${Date.now()}`,
+        }),
+      );
+      safeSyncAuthRecord(updated);
+      setAvatarFile(null);
+      setSaved(t('profile_saved'));
+      setTimeout(() => setSaved(''), 2500);
+    } catch (err) {
+      setFileError(err?.response?.message || err?.message || t('upload_error_generic') || t('something_wrong'));
+    } finally {
+      setAvatarUploading(false);
+    }
   };
 
   const removeAvatar = async () => {
@@ -458,6 +479,13 @@ const OwnerProfileEditor = () => {
         </div>
       )}
 
+      {/* ---- Identity documents — moved to the very top of the page so it's
+             the first thing the owner sees (previously buried at the bottom,
+             inside the personal-info form). It never depended on that form
+             for submission (it uploads on its own), so lifting it out is
+             purely a layout change. ---- */}
+      <IdentityDocumentsSection status={status} onChanged={load} />
+
       {/* ---- 1) Header: photo + name + status ---- */}
       <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center gap-4">
@@ -473,9 +501,9 @@ const OwnerProfileEditor = () => {
                 {(profile.name || user?.email || '?').slice(0, 1).toUpperCase()}
               </span>
             )}
-            {avatarFile && (
-              <span className="absolute -bottom-1 -end-1 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold text-white">
-                {t('update_document')}
+            {avatarUploading && (
+              <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40">
+                <Loader2 size={20} className="animate-spin text-white" />
               </span>
             )}
           </div>
@@ -486,16 +514,16 @@ const OwnerProfileEditor = () => {
             <div className="flex flex-wrap items-center gap-2">
               <input ref={avatarRef} type="file" accept="image/jpeg,image/png,image/webp,image/svg+xml,image/gif" className="hidden" onChange={pickAvatar} />
               {!avatarUrl && !avatarFile && (
-                <Button type="button" variant="default" size="sm" onClick={() => avatarRef.current?.click()} className="min-h-[40px]">
+                <Button type="button" variant="default" size="sm" onClick={() => avatarRef.current?.click()} disabled={avatarUploading} className="min-h-[40px]">
                   <Upload size={14} className="me-1.5" />{t('profile_photo_upload')}
                 </Button>
               )}
               {(avatarUrl || avatarFile) && (
                 <>
-                  <Button type="button" variant="outline" size="sm" onClick={() => avatarRef.current?.click()} className="min-h-[40px]">
+                  <Button type="button" variant="outline" size="sm" onClick={() => avatarRef.current?.click()} disabled={avatarUploading} className="min-h-[40px]">
                     <Camera size={14} className="me-1.5" />{t('profile_photo_change')}
                   </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={removeAvatar} className="min-h-[40px] text-destructive hover:bg-destructive/10">
+                  <Button type="button" variant="outline" size="sm" onClick={removeAvatar} disabled={avatarUploading} className="min-h-[40px] text-destructive hover:bg-destructive/10">
                     <Trash2 size={14} className="me-1.5" />{t('profile_photo_remove')}
                   </Button>
                 </>
@@ -613,9 +641,6 @@ const OwnerProfileEditor = () => {
             </Button>
           </div>
         </div>
-
-        {/* ---- 3) Identity documents (collapsible, multi-doc) ---- */}
-        <IdentityDocumentsSection status={status} onChanged={load} />
 
         {fileError && <p className="text-sm text-destructive">{fileError}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}

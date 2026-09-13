@@ -37,9 +37,20 @@ export async function ensureFreshToken() {
       });
       return true;
     } catch (err) {
-      // 401 here means the token is too expired to refresh — surface false so
-      // the caller can prompt re-login. Do NOT clear the store here.
-      return false;
+      // Only a genuine 401 means the token is too expired/invalid to
+      // refresh — surface false so the caller can prompt re-login. Do NOT
+      // clear the store here. Every other failure (a network blip, the
+      // platform rate limit, a transient 5xx, a CORS hiccup) is NOT evidence
+      // the session actually expired — this used to return false for ANY
+      // error, which made callers show "session expired, please log in
+      // again" during completely normal active browsing whenever this
+      // best-effort pre-flight refresh happened to fail for an unrelated
+      // reason, even while pb.authStore still held a perfectly valid,
+      // non-expired token. Treat those as "unknown, proceed anyway" —
+      // withAuthRetry() below still safely detects and handles a REAL 401
+      // on the actual write.
+      const status = err?.status || err?.response?.status;
+      return status !== 401;
     } finally {
       refreshInFlight = null;
     }

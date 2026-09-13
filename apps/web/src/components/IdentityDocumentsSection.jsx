@@ -357,7 +357,8 @@ function AddIdentityForm({ hasPassport, hasResidence, hideCancel, onCancel, onDo
   };
   const fields = fieldMap[type];
 
-  const submit = async () => {
+  const submit = async (pickedFile) => {
+    const f = pickedFile || file;
     setErr('');
     if (type === 'none') {
       setErr(t('identity_choose_type_required'));
@@ -367,19 +368,19 @@ function AddIdentityForm({ hasPassport, hasResidence, hideCancel, onCancel, onDo
       setErr(t('identity_doc_number'));
       return;
     }
-    if (!file) {
+    if (!f) {
       setErr(t('identity_pick_file'));
       return;
     }
-    setUpload({ percent: 0, status: 'preparing', error: null, name: file.name, size: file.size });
-    const prepared = await prepareFile(file, DOC_KIND);
+    setUpload({ percent: 0, status: 'preparing', error: null, name: f.name, size: f.size });
+    const prepared = await prepareFile(f, DOC_KIND);
     if (!prepared.ok) {
-      setUpload({ percent: 0, status: 'error', error: t(prepared.error) || t('upload_error_generic'), name: file.name, size: file.size });
+      setUpload({ percent: 0, status: 'error', error: t(prepared.error) || t('upload_error_generic'), name: f.name, size: f.size });
       return;
     }
     const controller = new AbortController();
     abortRef.current = controller;
-    setUpload({ percent: 0, status: 'uploading', error: null, name: file.name, size: prepared.file.size });
+    setUpload({ percent: 0, status: 'uploading', error: null, name: f.name, size: prepared.file.size });
     try {
       const updated = await uploadRecordFile({
         collection: 'users',
@@ -391,14 +392,14 @@ function AddIdentityForm({ hasPassport, hasResidence, hideCancel, onCancel, onDo
           setUpload((u) => ({ ...u, percent, size: total })),
       });
       safeSyncAuthRecord(updated);
-      setUpload({ percent: 100, status: 'done', error: null, name: file.name, size: prepared.file.size });
+      setUpload({ percent: 100, status: 'done', error: null, name: f.name, size: prepared.file.size });
       setTimeout(() => onDone(), 900);
     } catch (e) {
       if (e?.isCancelled) {
         setUpload(null);
         return;
       }
-      setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(e, t), name: file.name, size: prepared.file.size });
+      setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(e, t), name: f.name, size: prepared.file.size });
     } finally {
       abortRef.current = null;
     }
@@ -448,7 +449,14 @@ function AddIdentityForm({ hasPassport, hasResidence, hideCancel, onCancel, onDo
           ref={fileRef}
           type="file"
           accept={FILE_LIMITS.doc.accept}
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          disabled={upload?.status === 'uploading' || upload?.status === 'preparing'}
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null;
+            setFile(f);
+            // Selecting a file uploads it immediately (once type + number are
+            // filled) — there is no separate "Upload" step to click anymore.
+            if (f) submit(f);
+          }}
           className="block w-full text-xs text-muted-foreground file:me-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-primary-foreground file:font-medium hover:file:bg-primary/90 cursor-pointer"
         />
         <p className="text-[10px] text-muted-foreground">{t('identity_max_size_hint')}</p>
@@ -457,26 +465,15 @@ function AddIdentityForm({ hasPassport, hasResidence, hideCancel, onCancel, onDo
 
       {err && <p className="text-xs text-destructive">{err}</p>}
 
-      {upload && <UploadStatus upload={upload} onRetry={submit} />}
+      {upload && <UploadStatus upload={upload} onRetry={() => submit()} />}
 
-      <div className="flex items-center justify-end gap-2">
-        {!hideCancel && (
+      {!hideCancel && (
+        <div className="flex items-center justify-end">
           <Button type="button" variant="outline" size="sm" onClick={cancel} disabled={upload?.status === 'uploading'} className="min-h-[36px]">
             {t('identity_cancel_add')}
           </Button>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          onClick={submit}
-          disabled={upload?.status === 'uploading' || upload?.status === 'preparing' || type === 'none'}
-          className="min-h-[36px]"
-        >
-          {upload?.status === 'uploading' || upload?.status === 'preparing'
-            ? <><Loader2 size={14} className="me-1 animate-spin" />{t('identity_uploading')}</>
-            : <><Upload size={14} className="me-1" />{t('identity_upload')}</>}
-        </Button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -772,25 +769,26 @@ function AddAdditionalForm({ onCancel, onDone }) {
   const fileRef = useRef(null);
   const abortRef = useRef(null);
 
-  const submit = async () => {
+  const submit = async (pickedFile) => {
+    const f = pickedFile || file;
     setErr('');
     if (type === 'other' && !name.trim()) {
       setErr(t('additional_name_required'));
       return;
     }
-    if (!file) {
+    if (!f) {
       setErr(t('additional_file_required'));
       return;
     }
-    setUpload({ percent: 0, status: 'preparing', error: null, name: file.name, size: file.size });
-    const prepared = await prepareFile(file, DOC_KIND);
+    setUpload({ percent: 0, status: 'preparing', error: null, name: f.name, size: f.size });
+    const prepared = await prepareFile(f, DOC_KIND);
     if (!prepared.ok) {
-      setUpload({ percent: 0, status: 'error', error: t(prepared.error) || t('upload_error_generic'), name: file.name, size: file.size });
+      setUpload({ percent: 0, status: 'error', error: t(prepared.error) || t('upload_error_generic'), name: f.name, size: f.size });
       return;
     }
     const controller = new AbortController();
     abortRef.current = controller;
-    setUpload({ percent: 0, status: 'uploading', error: null, name: file.name, size: prepared.file.size });
+    setUpload({ percent: 0, status: 'uploading', error: null, name: f.name, size: prepared.file.size });
     try {
       const fd = new FormData();
       fd.append('type', type);
@@ -801,14 +799,14 @@ function AddAdditionalForm({ onCancel, onDone }) {
       await pb.collection(ADD_COLLECTION).create(fd, {
         requestKey: `add-doc-create-${user.id}-${Date.now()}`,
       });
-      setUpload({ percent: 100, status: 'done', error: null, name: file.name, size: prepared.file.size });
+      setUpload({ percent: 100, status: 'done', error: null, name: f.name, size: prepared.file.size });
       setTimeout(() => onDone(), 800);
     } catch (e) {
       if (e?.isCancelled) {
         setUpload(null);
         return;
       }
-      setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(e, t) || t('upload_error_generic'), name: file.name, size: prepared.file.size });
+      setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(e, t) || t('upload_error_generic'), name: f.name, size: prepared.file.size });
     } finally {
       abortRef.current = null;
     }
@@ -868,7 +866,14 @@ function AddAdditionalForm({ onCancel, onDone }) {
           ref={fileRef}
           type="file"
           accept={FILE_LIMITS.doc.accept}
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          disabled={upload?.status === 'uploading' || upload?.status === 'preparing'}
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null;
+            setFile(f);
+            // Selecting a file uploads it immediately — no separate "Upload"
+            // step to click anymore.
+            if (f) submit(f);
+          }}
           className="block w-full text-xs text-muted-foreground file:me-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-primary-foreground file:font-medium hover:file:bg-primary/90 cursor-pointer"
         />
         <p className="text-[10px] text-muted-foreground">{t('identity_max_size_hint')}</p>
@@ -880,24 +885,13 @@ function AddAdditionalForm({ onCancel, onDone }) {
       {upload && (
         <UploadStatus
           upload={upload}
-          onRetry={submit}
+          onRetry={() => submit()}
         />
       )}
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-end">
         <Button type="button" variant="outline" size="sm" onClick={cancel} disabled={upload?.status === 'uploading'} className="min-h-[36px]">
           {t('additional_cancel')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={submit}
-          disabled={upload?.status === 'uploading' || upload?.status === 'preparing'}
-          className="min-h-[36px]"
-        >
-          {upload?.status === 'uploading' || upload?.status === 'preparing'
-            ? <><Loader2 size={14} className="me-1 animate-spin" />{t('additional_uploading')}</>
-            : <><Upload size={14} className="me-1" />{t('additional_upload')}</>}
         </Button>
       </div>
     </div>
