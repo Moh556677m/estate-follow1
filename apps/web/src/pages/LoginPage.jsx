@@ -42,21 +42,32 @@ const LoginPage = () => {
         );
         return;
       }
-      await login(email, password);
+      // Tags this request as coming from the regular login page so
+      // PocketBase's own login hook (pb_hooks/portal-login-separation.pb.js)
+      // rejects it server-side if the account turns out to be staff/admin —
+      // not just via the isStaff() check below, which only runs after a
+      // successful PocketBase auth.
+      await login(email, password, { portal: 'user' });
 
       // Enforce the selected account type — not just a visual change.
       const rec = pb.authStore.record;
       const isStaff =
         !!rec?.is_super_admin ||
         ['admin', 'editor', 'support', 'custom'].includes(rec?.role);
-      if (!isStaff) {
-        const actual = String(rec?.account_type || 'owner').toLowerCase();
-        if (actual !== accountType) {
-          await logout();
-          setError(t('err_account_type_mismatch'));
-          setLoading(false);
-          return;
-        }
+      if (isStaff) {
+        // A staff/admin account tried to sign in from the regular user
+        // login page — it must only ever be usable from /admin/login.
+        await logout();
+        setError(t('err_staff_portal_only'));
+        setLoading(false);
+        return;
+      }
+      const actual = String(rec?.account_type || 'owner').toLowerCase();
+      if (actual !== accountType) {
+        await logout();
+        setError(t('err_account_type_mismatch'));
+        setLoading(false);
+        return;
       }
 
       navigate('/dashboard');
@@ -65,6 +76,7 @@ const LoginPage = () => {
       if (code === 'ACCOUNT_SUSPENDED') setError(t('err_account_suspended'));
       else if (code === 'ACCOUNT_INACTIVE') setError(t('err_account_inactive'));
       else if (code === 'ACCOUNT_PENDING') setError(t('err_invalid_credentials'));
+      else if (code === 'STAFF_PORTAL_ONLY') setError(t('err_staff_portal_only'));
       else if (code === 'MAX_SESSIONS' || code === 'MAX_DEVICES') setError(t('err_max_sessions'));
       else if (code === 'SESSION_ERROR') setError(t('something_wrong'));
       else if (code === 'INVALID_CREDENTIALS') setError(t('err_invalid_credentials'));

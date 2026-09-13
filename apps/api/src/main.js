@@ -66,7 +66,14 @@ app.use(
   cors({
     origin: process.env.CORS_ORIGIN || false,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'QUERY'],
-    allowedHeaders: ['Authorization', 'Content-Type'],
+    // X-Portal: tags a PocketBase auth-with-password request as coming from
+    // the admin login page or the regular user login page (see
+    // AuthContext.jsx's login() and pb_hooks/portal-login-separation.pb.js)
+    // so staff and owner accounts can be rejected server-side for using the
+    // wrong one. Only matters for a cross-origin dev setup — same-origin
+    // requests never go through CORS at all — but must be explicitly
+    // allowed here or a cross-origin preflight would strip it.
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Portal'],
   }),
 );
 

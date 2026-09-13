@@ -48,6 +48,8 @@ export function classifyAuthError(err) {
       'DEVICE_EXISTS',
       'SESSION_ERROR',
       'AUTH_ERROR',
+      'STAFF_PORTAL_ONLY',
+      'OWNER_PORTAL_ONLY',
     ];
     if (known.includes(err.code)) return err;
   }
@@ -80,6 +82,12 @@ export function classifyAuthError(err) {
   }
   if (blob.includes('device_exists')) {
     return authError('DEVICE_EXISTS', msg);
+  }
+  if (blob.includes('staff_portal_only')) {
+    return authError('STAFF_PORTAL_ONLY', msg);
+  }
+  if (blob.includes('owner_portal_only')) {
+    return authError('OWNER_PORTAL_ONLY', msg);
   }
 
   // Only pure credential failures — do NOT use bare status===400 (session
@@ -333,7 +341,12 @@ export const AuthProvider = ({ children }) => {
       user,
       isAuthed: !!(user && pb.authStore.isValid),
       bootstrapped,
-      login: async (email, password) => {
+      // `portal` tells the PocketBase-side login hook (see
+      // pb_hooks/portal-login-separation.pb.js) which login page this
+      // request came from, so staff/admin accounts and regular owner
+      // accounts can be rejected server-side for using the wrong one —
+      // not just via the client-side isStaff() check each page also does.
+      login: async (email, password, { portal = 'user' } = {}) => {
         const normalized = normalizeEmail(email);
         const pass = String(password ?? '');
 
@@ -345,6 +358,7 @@ export const AuthProvider = ({ children }) => {
         try {
           result = await pb.collection('users').authWithPassword(normalized, pass, {
             requestKey: `login-${normalized}-${Date.now()}`,
+            headers: { 'X-Portal': portal },
           });
         } catch (err) {
           throw classifyAuthError(err);

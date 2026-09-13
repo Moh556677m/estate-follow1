@@ -73,7 +73,12 @@ const AdminLoginPage = () => {
       return;
     }
     try {
-      await login(email, password);
+      // Tags this request as coming from the admin portal so PocketBase's
+      // own login hook (pb_hooks/portal-login-separation.pb.js) rejects it
+      // server-side if the account turns out to be a regular owner — not
+      // just via the isStaff() check below, which only runs after a
+      // successful PocketBase auth.
+      await login(email, password, { portal: 'admin' });
       const rec = pb.authStore.record;
       if (!isStaff(rec)) {
         // A regular owner/broker/company tried to use the admin portal.
@@ -88,8 +93,15 @@ const AdminLoginPage = () => {
       if (code === 'ACCOUNT_SUSPENDED') setError(t('err_account_suspended'));
       else if (code === 'ACCOUNT_INACTIVE') setError(t('err_account_inactive'));
       else if (code === 'ACCOUNT_PENDING') setError(t('admin_portal_not_authorized'));
+      else if (code === 'OWNER_PORTAL_ONLY') setError(t('admin_portal_not_authorized'));
       else if (code === 'MAX_SESSIONS' || code === 'MAX_DEVICES') setError(t('err_max_sessions'));
       else if (code === 'INVALID_CREDENTIALS') setError(t('err_invalid_credentials'));
+      // AUTH_ERROR/SESSION_ERROR are NOT credential failures (e.g. a shared
+      // rate limit, a transient network/proxy error) — showing them as
+      // "incorrect email or password" here was misleading staff into
+      // thinking correct credentials were wrong. Previously this whole
+      // branch fell through to err_invalid_credentials unconditionally.
+      else if (code === 'AUTH_ERROR' || code === 'SESSION_ERROR') setError(t('something_wrong'));
       else setError(t('err_invalid_credentials'));
     } finally {
       setLoading(false);
