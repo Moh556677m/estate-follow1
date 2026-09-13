@@ -40,7 +40,7 @@ const PhoneField = ({
   showLabels = true,
   id,
 }) => {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { countries } = useGeoData();
   const [cc, setCc] = useState('');
   const [num, setNum] = useState('');
@@ -107,12 +107,10 @@ const PhoneField = ({
     onChange(buildPhone(nextCc, nextNum));
   };
 
-  // Codes-only list: one entry per distinct dial code (several countries can
-  // share the same calling code, e.g. +1, +7 — the picker shows a code only
-  // once, never a country name, so a duplicate-by-name entry would just be a
-  // confusing repeat of the same code). Nothing is dropped from what's
-  // selectable — every country's dial code from `countries` is still
-  // represented by exactly one row here.
+  // One row per distinct dial code (several countries can share the same
+  // calling code, e.g. +1, +7 — the picker shows a code only once) but each
+  // row still carries its representative country's name, so the list reads
+  // as "Country Name  +code" instead of a bare, unlabeled number.
   const dialOnlyList = useMemo(() => {
     const seen = new Set();
     const out = [];
@@ -120,7 +118,7 @@ const PhoneField = ({
       const dial = (c.dial || '').trim();
       if (!dial || seen.has(dial)) return;
       seen.add(dial);
-      out.push({ dial, code: c.code });
+      out.push({ dial, code: c.code, en: c.en, ar: c.ar });
     });
     // Sort numerically by the digits of the code so the list is scannable
     // (e.g. +1, +7, +20, +212, +966, +971 …) rather than in whatever order
@@ -133,16 +131,19 @@ const PhoneField = ({
     return out;
   }, [countries]);
 
-  // Search matches by CODE ONLY (digits, with or without a leading '+') —
-  // no country name/search-by-name anymore, per the codes-only design above.
+  // Matches by dial code (digits, with or without a leading '+') OR by the
+  // country name in the current language.
   const filteredCountries = useMemo(() => {
     const qDigits = ccQuery.trim().replace(/^\+/, '').replace(/\D/g, '');
-    if (!qDigits) return dialOnlyList;
+    const qName = ccQuery.trim().toLowerCase();
+    if (!qDigits && !qName) return dialOnlyList;
     return dialOnlyList.filter((c) => {
       const dial = (c.dial || '').replace(/^\+/, '');
-      return dial.startsWith(qDigits);
+      if (qDigits && dial.startsWith(qDigits)) return true;
+      const name = (lang === 'ar' ? c.ar : c.en) || '';
+      return qName ? name.toLowerCase().includes(qName) : false;
     });
-  }, [ccQuery, dialOnlyList]);
+  }, [ccQuery, dialOnlyList, lang]);
 
   // Validation state for the local number against the selected country.
   const validationState = validateLocalNumber(isoCode, num);
@@ -240,7 +241,14 @@ const PhoneField = ({
               </button>
             </PopoverTrigger>
             <PopoverContent
-              className="w-[min(var(--radix-popover-trigger-width),18rem)] p-0"
+              // Fixed width, independent of the trigger button (which is only
+              // 92px — a small "+971 ▾" chip). The old
+              // `min(var(--radix-popover-trigger-width), 18rem)` tied the
+              // whole dropdown's width to that 92px trigger, squeezing the
+              // country list into a sliver too narrow to show a country name
+              // next to its code — which was a real contributor to the list
+              // looking cramped/disorganized.
+              className="w-72 p-0"
               align="start"
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
@@ -277,19 +285,26 @@ const PhoneField = ({
                     {t('phone_no_match')}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-1">
+                  <div className="flex flex-col gap-0.5">
                     {filteredCountries.map((c) => (
                       <button
                         key={c.dial}
                         type="button"
                         onClick={() => chooseCode(c.dial || '', c.code)}
                         className={cn(
-                          'rounded-md px-2 py-2 text-sm font-semibold tabular-nums text-center hover:bg-accent',
+                          'flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-sm hover:bg-accent',
                           cc === c.dial && 'bg-primary/8',
                         )}
-                        dir="ltr"
                       >
-                        {c.dial}
+                        <span className="truncate text-start">
+                          {(lang === 'ar' ? c.ar : c.en) || c.code}
+                        </span>
+                        <span
+                          dir="ltr"
+                          className="shrink-0 font-semibold tabular-nums text-muted-foreground"
+                        >
+                          {c.dial}
+                        </span>
                       </button>
                     ))}
                   </div>

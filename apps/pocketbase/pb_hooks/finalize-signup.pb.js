@@ -187,14 +187,30 @@ routerAdd(
       rec.set('verified', true);
     } catch (_) {}
 
-    // Persist referral attribution on the user record.
+    // Persist referral attribution on the user record. `referred_by` is a
+    // relation field to another `users` record — rec.set() doesn't validate
+    // immediately, so a bad/unknown id here (e.g. a typo, or a stray value
+    // sent by something other than the real referral flow) would otherwise
+    // only surface as an uncaught save() failure below. Confirm the target
+    // actually exists first and skip silently if not, rather than failing
+    // the whole signup over an optional attribution field.
     if (referredBy) {
       try {
+        $app.findRecordById('users', referredBy);
         rec.set('referred_by', referredBy);
-      } catch (_) {}
+      } catch (_) {
+        // Unknown/invalid referrer id — not fatal, just skip the attribution.
+      }
     }
 
-    $app.save(rec);
+    try {
+      $app.save(rec);
+    } catch (saveErr) {
+      $app.logger().error('finalize-signup save failed', 'err', String(saveErr));
+      throw new BadRequestError(
+        'Could not complete the signup. Please check your details and try again.',
+      );
+    }
 
     // Dual-write the real per-user Subscription record (requirement #4) —
     // same trial decision as above, mirrored into user_subscriptions so it

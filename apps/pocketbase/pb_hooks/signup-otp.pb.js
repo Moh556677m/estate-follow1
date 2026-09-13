@@ -81,11 +81,29 @@ onRecordRequestOTPRequest((e) => {
     record.setPassword($security.randomString(30));
     record.set("role", "owner");
     record.set("pending_signup", true);
+    // The users collection requires "nationality" (TextField) and "gender"
+    // (SelectField, values male/female) — added by
+    // 1787862388_signup_otp_fields.js — but this placeholder is created from
+    // nothing but an email address, before the signup form's own personal
+    // details are known. Without SOME valid value here, e.app.save() below
+    // always fails schema validation, which made EVERY brand-new signup fail
+    // before ever reaching the "enter your code" screen. finalize-signup.pb.js
+    // overwrites both with the real values the user actually entered once the
+    // OTP is verified, so these placeholders are never user-visible.
+    record.set("nationality", "PENDING");
+    record.set("gender", "male");
     // Mark verified so the link-based verification email hook (which fires on
     // every record create) skips this placeholder — the OTP code is the proof
     // of email ownership for the signup flow.
     record.set("verified", true);
-    e.app.save(record);
+    try {
+      e.app.save(record);
+    } catch (saveErr) {
+      $app.logger().error("signup placeholder record creation failed", "err", String(saveErr));
+      throw new BadRequestError(
+        "Could not start the signup process. Please try again or contact support.",
+      );
+    }
     e.record = record;
     return e.next();
   }

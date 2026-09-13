@@ -175,13 +175,14 @@ const SignupPage = () => {
         // domain not verified / transport error). Surface it clearly instead
         // of opening the OTP modal for a code that was never delivered.
         setError(t('otp_send_failed'));
-      } else if (
-        msg.includes('already registered') ||
-        err?.status === 400
-      ) {
+      } else if (msg.includes('already registered')) {
         setError(t('account_exists'));
       } else {
-        setError(t('something_wrong'));
+        // Show the real server message when there is one (e.g. a schema
+        // validation failure while creating the signup placeholder record)
+        // instead of always collapsing every unrecognized error into the
+        // same generic "something went wrong" with no way to diagnose it.
+        setError(err?.response?.message || err?.message || t('something_wrong'));
       }
     } finally {
       setSending(false);
@@ -234,7 +235,7 @@ const SignupPage = () => {
       } else if (msg.includes('already registered')) {
         setOtpError(t('account_exists'));
       } else {
-        setOtpError(t('something_wrong'));
+        setOtpError(err?.response?.message || err?.message || t('something_wrong'));
       }
     } finally {
       setResending(false);
@@ -286,7 +287,7 @@ const SignupPage = () => {
       navigate(postSignupPath(), { replace: true });
     } catch (err) {
       setVerified(false);
-      setOtpError(t('something_wrong'));
+      setOtpError(err?.response?.message || err?.message || t('something_wrong'));
     }
   };
 
@@ -325,15 +326,17 @@ const SignupPage = () => {
       await completeSignup();
     } catch (err) {
       setVerifying(false);
-      const msg = err?.response?.message || err?.message || '';
-      if (
-        msg.toLowerCase().includes('expired') ||
-        msg.toLowerCase().includes('invalid') ||
-        err?.status === 400
-      ) {
+      const msg = String(err?.response?.message || err?.message || '');
+      const lower = msg.toLowerCase();
+      // Only a genuine OTP failure should tell the user their CODE is wrong.
+      // This used to also fire for ANY 400 response — including a real
+      // finalize-signup validation error (e.g. a bad password or the
+      // "nationality/gender required" placeholder bug) — which misled users
+      // into re-entering a code that was actually correct.
+      if (lower.includes('otp') || lower.includes('expired')) {
         setOtpError(t('otp_invalid'));
       } else {
-        setOtpError(t('something_wrong'));
+        setOtpError(msg || t('something_wrong'));
       }
     }
   };
