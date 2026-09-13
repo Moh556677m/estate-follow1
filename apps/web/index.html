@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+	<head>
+		<meta charset="UTF-8" />
+		<!-- Official logo icons: the supplied Estate Follow artwork is exported at
+		     every browser and device size without changing its proportions or color. -->
+		<link rel="icon" href="/favicon.ico?v=20260909-1" sizes="any" />
+		<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=20260909-1" />
+		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260909-1" />
+		<link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png?v=20260909-1" />
+		<link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png?v=20260909-1" />
+		<link rel="apple-touch-icon" type="image/png" sizes="180x180" href="/apple-touch-icon.png?v=20260909-1" />
+		<link rel="shortcut icon" href="/favicon.ico?v=20260909-1" />
+		<link rel="manifest" href="/manifest.webmanifest?v=20260909-1" />
+		<meta name="msapplication-TileColor" content="#22C55E" />
+		<meta name="msapplication-TileImage" content="/android-chrome-192x192.png?v=20260909-1" />
+		<meta name="generator" content="Hostinger AI Builder" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
+		<meta name="theme-color" content="#22C55E" />
+		<meta name="format-detection" content="telephone=no" />
+		<link rel="canonical" href="https://estatefollow.com/" />
+		<meta name="application-name" content="Estate Follow" />
+		<meta name="apple-mobile-web-app-title" content="Estate Follow" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+		<!-- Google Analytics (gtag.js) and Microsoft Clarity used to be loaded
+		     here unconditionally. They now load dynamically from
+		     src/lib/integrationScriptLoader.js (invoked in main.jsx) so the
+		     Integration Registry's Admin Enable/Disable toggle (Admin →
+		     External Tools) actually controls whether they run, instead of
+		     always loading regardless of what the Admin panel showed. -->
+
+		<!-- Global social preview defaults — every page inherits the official
+		     Estate Follow logo as its link preview / search thumbnail. Pages
+		     may override via <Seo image=...> or AuthPageSeo social_image. -->
+		<meta property="og:site_name" content="Estate Follow" />
+		<meta property="og:type" content="website" />
+		<meta property="og:image" content="https://estatefollow.com/estate-follow-logo.png" />
+		<meta property="og:image:alt" content="Estate Follow — official logo" />
+		<meta property="og:image:width" content="1024" />
+		<meta property="og:image:height" content="1024" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:image" content="https://estatefollow.com/estate-follow-logo.png" />
+		<meta name="twitter:image:alt" content="Estate Follow — official logo" />
+
+		<!-- Organization structured data — official brand identity. The runtime
+		     BrandStructuredData component augments this with the live Brand Entity
+		     (sameAs, contact) edited in SEO & AI Search > Brand Entity. -->
+		<script type="application/ld+json">
+		{
+			"@context": "https://schema.org",
+			"@type": "Organization",
+			"name": "Estate Follow",
+			"alternateName": "إستيت فولو",
+			"url": "https://estatefollow.com",
+			"logo": "https://estatefollow.com/estate-follow-logo.png",
+			"image": "https://estatefollow.com/estate-follow-logo.png",
+			"description": "Estate Follow is a smart property management and real estate portfolio tracking platform that helps property owners manage properties, installments, rentals, payments, contracts, documents, and reminders from one place.",
+			"sameAs": []
+		}
+		</script>
+		<title>Estate Follow</title>
+
+		<!-- OneSignal Web SDK — web push notifications. It also now loads
+		     dynamically from src/lib/integrationScriptLoader.js (see the GA4/
+		     Clarity note above) — same reason: a real Admin Enable/Disable
+		     toggle instead of an always-on static tag. Service worker file is
+		     still served from site root at /OneSignalSDKWorker.js (see
+		     apps/web/public) regardless of this toggle, since that file must
+		     exist as a static asset either way. -->
+
+		<script>
+			// Mobile zoom lock — scroll only, no zoom of any kind.
+			// Blocks iOS Safari pinch (gesturestart/gesturechange/gestureend),
+			// two-finger touchmove scaling, and double-tap zoom. Vertical
+			// scroll (single-finger pan-y) stays fully working. Desktop is
+			// untouched (these events never fire there).
+			//
+			// IMPORTANT (keyboard stability): the preventDefault() calls below
+			// are NEVER fired when the touch target is a form field
+			// (input/textarea/select/contenteditable). Calling preventDefault
+			// on touchend/touchmove over a focused field makes mobile Safari &
+			// Chrome dismiss the soft keyboard and drop focus on the first
+			// keystroke. Guarding the field case keeps the zoom lock on page
+			// content while letting the keyboard behave normally inside inputs.
+			(function () {
+				if (typeof window === 'undefined') return;
+				function isField(target) {
+					var el = target && (target.target || target);
+					if (!el || el.nodeType !== 1) return false;
+					var tag = el.tagName;
+					if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+					if (el.isContentEditable) return true;
+					return false;
+				}
+				function stop(e) { e.preventDefault(); }
+				document.addEventListener('gesturestart', stop, { passive: false });
+				document.addEventListener('gesturechange', stop, { passive: false });
+				document.addEventListener('gestureend', stop, { passive: false });
+				document.addEventListener('touchmove', function (e) {
+					if (e.touches && e.touches.length > 1 && !isField(e)) {
+						e.preventDefault();
+					}
+				}, { passive: false });
+				var lastTouch = 0;
+				document.addEventListener('touchend', function (e) {
+					if (isField(e)) { lastTouch = Date.now(); return; }
+					var now = Date.now();
+					if (now - lastTouch <= 300) { e.preventDefault(); }
+					lastTouch = now;
+				}, { passive: false });
+
+				// ---- Keyboard stability guard (synchronous refocus) ----
+				// ROOT FIX for the "soft keyboard dismisses after every character"
+				// bug on iOS Safari / Android Chrome. When a React re-render
+				// momentarily blurs the active input, the previous guard refocused
+				// via setTimeout(0) — but by then iOS had already finalized the
+				// blur and closed the keyboard (iOS only reopens the soft keyboard
+				// inside a user gesture, never from a deferred callback). The user
+				// saw: type one char → keyboard closes → tap field → type → closes.
+				//
+				// This guard refocuses SYNCHRONOUSLY inside the capture-phase
+				// `focusout`, BEFORE the browser finalizes the blur. Cancelling the
+				// blur in-flight keeps the keyboard open on iOS because, from the
+				// browser's perspective, the field never actually lost focus.
+				//
+				// It only fires when the blur is re-render-induced (a keystroke
+				// happened more recently than any tap/click AND focus did NOT move
+				// to another field), so it never fights a deliberate tap on a
+				// button, link, another input, or OTP auto-advance. A deferred
+				// fallback re-refocuses by id/name if the original node was
+				// unmounted (true remount case). Never loops (60ms throttle).
+				var kbLastInputAt = 0;
+				var kbLastGestureAt = Date.now();
+				var kbLastMeta = null;
+				var kbLastRestoreAt = 0;
+				function kbTypingInduced() {
+					return kbLastInputAt > kbLastGestureAt && (Date.now() - kbLastInputAt) <= 1500;
+				}
+				document.addEventListener('input', function (e) {
+					if (isField(e)) {
+						kbLastInputAt = Date.now();
+						kbLastMeta = { id: e.target.id || '', name: e.target.name || '', tag: e.target.tagName };
+					}
+				}, true);
+				['touchstart', 'mousedown', 'pointerdown', 'click'].forEach(function (ev) {
+					document.addEventListener(ev, function () { kbLastGestureAt = Date.now(); }, true);
+				});
+				document.addEventListener('focusin', function (e) {
+					if (isField(e)) {
+						var el = e.target;
+						kbLastMeta = { id: el.id || '', name: el.name || '', tag: el.tagName };
+					}
+				}, true);
+				document.addEventListener('focusout', function (e) {
+					if (!isField(e)) return;
+					var lost = e.target;
+					// If focus already moved to another field (OTP auto-advance,
+					// click on another input), it is a deliberate move — never
+					// steal it back.
+					var aeNow = document.activeElement;
+					if (aeNow && aeNow !== lost && isField(aeNow)) return;
+					// Only refocus for re-render-induced blur (keystroke newer than
+					// the last gesture). A tap/click updates kbLastGestureAt first,
+					// so this stays false for deliberate interactions.
+					if (!kbTypingInduced()) return;
+					// Synchronous refocus — cancels the blur before iOS finalizes
+					// it, so the soft keyboard stays open. Throttled to avoid loops.
+					if (Date.now() - kbLastRestoreAt >= 60 && lost && lost.isConnected) {
+						kbLastRestoreAt = Date.now();
+						try { lost.focus({ preventScroll: true }); } catch (_) {}
+					}
+					// Deferred fallback: if the synchronous refocus did not stick
+					// (React unmounted the node), refocus the replacement element by
+					// id/name so the user keeps typing without re-tapping.
+					setTimeout(function () {
+						var ae = document.activeElement;
+						if (ae && isField(ae)) return;
+						if (ae && ae.tagName && ae.tagName !== 'BODY' && ae.tagName !== 'HTML') return;
+						if (!kbTypingInduced()) return;
+						var target = null;
+						if (kbLastMeta) {
+							if (kbLastMeta.id) target = document.getElementById(kbLastMeta.id);
+							if (!target && kbLastMeta.name) {
+								var byName = document.getElementsByName(kbLastMeta.name);
+								if (byName && byName.length) target = byName[0];
+							}
+						}
+						if (target && isField(target) && Date.now() - kbLastRestoreAt >= 60) {
+							kbLastRestoreAt = Date.now();
+							try { target.focus({ preventScroll: true }); } catch (_) {}
+						}
+					}, 0);
+				}, true);
+			})();
+		</script>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/main.jsx"></script>
+	</body>
+</html>

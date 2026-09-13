@@ -1,0 +1,49 @@
+# --- Secrets / environment -------------------------------------------------
+# Real env files must never be committed. Only *.example files (which must
+# never contain real secrets — placeholders only) are allowed.
+.env
+.env.*
+!.env.example
+!apps/**/.env.example
+
+# --- PocketBase runtime data -------------------------------------------------
+# The actual database, encrypted settings, uploaded files, logs. This is
+# runtime state, not source code — never committed.
+pb_data/
+apps/pocketbase/pb_data/
+**/pb_data/
+
+# --- Dependencies -------------------------------------------------------
+node_modules/
+**/node_modules/
+
+# --- Build output ---------------------------------------------------------
+apps/web/dist/
+apps/web/.vite/
+dist/
+build/
+
+# --- Logs / runtime output --------------------------------------------------
+*.log
+npm-debug.log*
+logs/
+
+# --- Backups / dumps ----------------------------------------------------
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*backup*.zip
+*backup*.tar.gz
+
+# --- Editor / OS cruft ----------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Misc temp ------------------------------------------------------------
+*.tmp
+.cache/
