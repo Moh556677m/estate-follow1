@@ -753,6 +753,16 @@ const AppLayout = ({
           collapsed ? 'hidden' : 'hidden lg:flex',
         )}
         data-ef-sidebar="desktop"
+        // Admin/staff must never lose the sidebar to any bug in another
+        // overlay on this page (a stuck full-screen form, a leftover Radix
+        // backdrop, etc.) — see the matching CSS in index.css, which pins
+        // this element (and its mobile Sheet counterpart below) to the
+        // highest possible z-index and forces pointer-events back on,
+        // unconditionally, whenever this attribute is present. Scoped to
+        // basePath === '/admin' only — the owner/editor dashboards keep the
+        // normal stacking (a full-screen property form is meant to take over
+        // there).
+        {...(basePath === '/admin' ? { 'data-ef-admin': 'true' } : {})}
       >
         {desktopHeader}
         {reorderMode && reorderToolbar}
@@ -783,6 +793,7 @@ const AppLayout = ({
           onClick={() => setCollapsed(false)}
           aria-label={t('sidebar_reopen')}
           className="hidden lg:flex fixed bottom-6 start-4 z-40 h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 pointer-events-auto touch-manipulation"
+          {...(basePath === '/admin' ? { 'data-ef-admin': 'true' } : {})}
         >
           <Menu size={22} />
         </button>
@@ -808,6 +819,7 @@ const AppLayout = ({
                 side={document.documentElement.dir === 'rtl' ? 'right' : 'left'}
                 className="ef-sidebar-sheet w-72 overflow-y-auto overscroll-contain p-0 pointer-events-auto"
                 onOpenAutoFocus={(e) => e.preventDefault()}
+                {...(basePath === '/admin' ? { 'data-ef-admin': 'true' } : {})}
               >
                 {mobileHeader}
                 {reorderMode && reorderToolbar}

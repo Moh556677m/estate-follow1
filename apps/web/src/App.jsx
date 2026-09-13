@@ -469,8 +469,18 @@ function resolveAccountSurface(user) {
 const DashboardHomeRedirect = () => {
     const { user } = useAuth();
     const surface = resolveAccountSurface(user);
+    // Staff belong under /admin/* (its own isolated portal, matching
+    // AdminLoginPage's own post-login navigate('/admin/overview')) — not
+    // under /dashboard/*, which AdminDashboard only ever rendered under
+    // because this redirect (and the DashboardRouter case below) predated
+    // that split and were never updated to match it. Landing staff on
+    // /dashboard/overview instead put them on an AdminDashboard instance
+    // whose basePath defaulted to "/dashboard" (its own default parameter),
+    // so every one of its OWN sidebar links pointed at /dashboard/<section>
+    // instead of /admin/<section> — a parallel, inconsistent copy of the
+    // admin console with none of the /admin-only hardening applied to it.
     if (surface === 'staff') {
-        return <Navigate to="/dashboard/overview" replace />;
+        return <Navigate to="/admin/overview" replace />;
     }
     return <Navigate to="/dashboard/home" replace />;
 };
@@ -479,7 +489,11 @@ const DashboardRouter = () => {
     const { user } = useAuth();
     const surface = resolveAccountSurface(user);
     // Strict role routing — staff use the admin console, everyone else the owner dashboard.
-    if (surface === 'staff') return <AdminDashboard />;
+    // basePath="/admin" matches the real /admin/:section route (see below) —
+    // without it, AdminDashboard falls back to its own default basePath
+    // ("/dashboard"), which is the wrong console entirely for staff (see the
+    // comment in DashboardHomeRedirect above for the full explanation).
+    if (surface === 'staff') return <AdminDashboard basePath="/admin" />;
     return <OwnerDashboard />;
 };
 

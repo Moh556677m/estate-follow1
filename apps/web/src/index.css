@@ -107,6 +107,21 @@ body {
   touch-action: manipulation;
 }
 
+/* Admin dashboard only (AppLayout sets data-ef-admin on the desktop
+   sidebar, the mobile sidebar Sheet, and the collapsed-sidebar reopen
+   button only when basePath === '/admin' — see AppLayout.jsx): guarantee
+   the sidebar is ALWAYS on top and ALWAYS clickable, no matter what other
+   bug might otherwise cover or disable it (a stuck full-screen dialog/
+   overlay, a leftover Radix backdrop, a bad z-index somewhere else). This
+   is a structural, CSS-only guarantee — it does not depend on any of that
+   other code being correct. Not applied on the owner/editor dashboards,
+   where a full-screen property form is meant to take over the whole
+   screen, sidebar included. */
+[data-ef-admin] {
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+}
+
 /* iOS Safari zooms the viewport when an input < 16px gains focus. Force a
    16px font on all focusable form controls (including select triggers and
    contenteditable) so the layout stays stable across iPhone, Android, iPad
