@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -37,10 +37,20 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
   const { t, lang } = useLanguage();
   const [mode, setMode] = useState(null); // 'reject' | 'changes'
   const [note, setNote] = useState('');
+  // Keep rendering the last non-null property while the dialog closes, so the
+  // <Dialog> stays mounted throughout and Radix runs its own close animation
+  // and body-pointer-events cleanup, instead of the whole subtree (dialog +
+  // portal + overlay) being yanked out mid-open by an early `return null` —
+  // which is what was leaving the admin dashboard frozen/unclickable.
+  const [lastProperty, setLastProperty] = useState(property);
+  useEffect(() => {
+    if (property) setLastProperty(property);
+  }, [property]);
+  const displayProperty = property || lastProperty;
 
-  if (!property) return null;
+  if (!displayProperty) return null;
 
-  const propPays = (payments || []).filter((p) => p.property === property.id);
+  const propPays = (payments || []).filter((p) => p.property === displayProperty.id);
   const installments = propPays.filter((p) => p.kind === 'installment');
   const rents = propPays.filter((p) => p.kind === 'rent');
 
@@ -52,9 +62,9 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
   };
 
   const typeLabel =
-    property.type === 'cash'
+    displayProperty.type === 'cash'
       ? t('type_cash')
-      : property.type === 'installment'
+      : displayProperty.type === 'installment'
         ? t('type_installment')
         : t('type_rented');
 
@@ -65,9 +75,9 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 flex-wrap">
             {t('review_submission')}
-            <StatusBadge status={property.status} />
+            <StatusBadge status={displayProperty.status} />
           </DialogTitle>
-          <DialogDescription>{propertyLabel(property)}</DialogDescription>
+          <DialogDescription>{propertyLabel(displayProperty)}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 pt-2">
@@ -75,7 +85,7 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
           <Section title={t('owner_information')}>
             <Row label={t('name')} value={owner?.name} />
             <Row label={t('email')} value={owner?.email} />
-            <Row label={t('phone')} value={owner?.phone || property.owner_phone} />
+            <Row label={t('phone')} value={owner?.phone || displayProperty.owner_phone} />
             <Row label={t('nationality')} value={owner?.nationality ? countryName(owner.nationality, lang) : '—'} />
             <Row label={t('gender')} value={owner?.gender ? (owner.gender === 'male' ? t('male') : t('female')) : '—'} />
             <Row label={t('joined')} value={formatDate(owner?.created, lang)} />
@@ -84,43 +94,43 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
           {/* Property details */}
           <Section title={t('property_details')}>
             <Row label={t('property_type')} value={typeLabel} />
-            <Row label={t('country')} value={countryName(property.country, lang)} />
-            <Row label={t('area')} value={property.area} />
-            <Row label={t('building')} value={property.building} />
-            <Row label={t('unit_number')} value={property.unit_number} />
-            <Row label={t('property_size')} value={property.property_size} />
-            <Row label={t('developer')} value={property.developer} />
-            {property.type === 'installment' && (
+            <Row label={t('country')} value={countryName(displayProperty.country, lang)} />
+            <Row label={t('area')} value={displayProperty.area} />
+            <Row label={t('building')} value={displayProperty.building} />
+            <Row label={t('unit_number')} value={displayProperty.unit_number} />
+            <Row label={t('property_size')} value={displayProperty.property_size} />
+            <Row label={t('developer')} value={displayProperty.developer} />
+            {displayProperty.type === 'installment' && (
               <>
                 <Row
                   label={t('handover_status')}
                   value={
-                    property.handover_status === 'handover_completed'
+                    displayProperty.handover_status === 'handover_completed'
                       ? t('handover_completed')
                       : t('under_construction')
                   }
                 />
-                <Row label={t('expected_handover_date')} value={formatDate(property.expected_handover_date, lang)} />
-                <Row label={t('installments_count')} value={property.installments_count} />
+                <Row label={t('expected_handover_date')} value={formatDate(displayProperty.expected_handover_date, lang)} />
+                <Row label={t('installments_count')} value={displayProperty.installments_count} />
               </>
             )}
           </Section>
 
           {/* Purchase / installment info */}
-          {(property.type === 'cash' || property.type === 'installment') && (
+          {(displayProperty.type === 'cash' || displayProperty.type === 'installment') && (
             <Section title={t('purchase_info')}>
-              <Row label={t('total_price')} value={formatMoney(property.total_price, lang)} />
-              <Row label={t('down_payment')} value={formatMoney(property.down_payment, lang)} />
-              <Row label={t('total_paid')} value={formatMoney(property.total_paid, lang)} />
-              <Row label={t('purchase_date')} value={formatDate(property.purchase_date, lang)} />
-              <Row label={t('service_charge_amount')} value={formatMoney(property.service_charge_amount, lang)} />
-              <Row label={t('service_charge_date')} value={formatDate(property.service_charge_date, lang)} />
+              <Row label={t('total_price')} value={formatMoney(displayProperty.total_price, lang)} />
+              <Row label={t('down_payment')} value={formatMoney(displayProperty.down_payment, lang)} />
+              <Row label={t('total_paid')} value={formatMoney(displayProperty.total_paid, lang)} />
+              <Row label={t('purchase_date')} value={formatDate(displayProperty.purchase_date, lang)} />
+              <Row label={t('service_charge_amount')} value={formatMoney(displayProperty.service_charge_amount, lang)} />
+              <Row label={t('service_charge_date')} value={formatDate(displayProperty.service_charge_date, lang)} />
               <Row
                 label={t('service_charge_frequency')}
                 value={
-                  property.service_charge_frequency === 'yearly'
+                  displayProperty.service_charge_frequency === 'yearly'
                     ? t('freq_yearly')
-                    : property.service_charge_frequency === 'one_time'
+                    : displayProperty.service_charge_frequency === 'one_time'
                       ? t('freq_one_time')
                       : '—'
                 }
@@ -129,7 +139,7 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
           )}
 
           {/* Installment plan */}
-          {property.type === 'installment' && installments.length > 0 && (
+          {displayProperty.type === 'installment' && installments.length > 0 && (
             <div className="rounded-xl border bg-card p-4 space-y-2">
               <h4 className="text-sm font-bold text-primary">{t('installment_plan')}</h4>
               <div className="divide-y">
@@ -146,16 +156,16 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
           )}
 
           {/* Rental details */}
-          {property.type === 'rented' && (
+          {displayProperty.type === 'rented' && (
             <>
               <Section title={t('rental_details')}>
-                <Row label={t('tenant_name')} value={property.tenant_name} />
-                <Row label={t('tenant_phone')} value={property.tenant_phone} />
-                <Row label={t('tenant_email')} value={property.tenant_email} />
-                <Row label={t('rent_amount')} value={formatMoney(property.rent_amount, lang)} />
-                <Row label={t('security_deposit')} value={formatMoney(property.security_deposit, lang)} />
-                <Row label={t('contract_start_date')} value={formatDate(property.contract_start_date, lang)} />
-                <Row label={t('contract_end_date')} value={formatDate(property.contract_end_date, lang)} />
+                <Row label={t('tenant_name')} value={displayProperty.tenant_name} />
+                <Row label={t('tenant_phone')} value={displayProperty.tenant_phone} />
+                <Row label={t('tenant_email')} value={displayProperty.tenant_email} />
+                <Row label={t('rent_amount')} value={formatMoney(displayProperty.rent_amount, lang)} />
+                <Row label={t('security_deposit')} value={formatMoney(displayProperty.security_deposit, lang)} />
+                <Row label={t('contract_start_date')} value={formatDate(displayProperty.contract_start_date, lang)} />
+                <Row label={t('contract_end_date')} value={formatDate(displayProperty.contract_end_date, lang)} />
               </Section>
               {rents.length > 0 && (
                 <div className="rounded-xl border bg-card p-4 space-y-2">
@@ -181,13 +191,13 @@ const PropertyReviewModal = ({ property, owner, payments, onClose, onAction }) =
             <div className="flex flex-wrap gap-2">
               <DocButton record={owner} field="passport_pdf" label={t('passport')} />
               <DocButton record={owner} field="residence_pdf" label={t('residence')} />
-              <DocButton record={property} field="title_deed_pdf" label={t('title_deed_pdf')} />
-              <DocButton record={property} field="tenant_document" label={t('tenant_document')} />
-              <DocButton record={property} field="lease_contract" label={t('lease_contract')} />
+              <DocButton record={displayProperty} field="title_deed_pdf" label={t('title_deed_pdf')} />
+              <DocButton record={displayProperty} field="tenant_document" label={t('tenant_document')} />
+              <DocButton record={displayProperty} field="lease_contract" label={t('lease_contract')} />
             </div>
-            {property.review_note && (
+            {displayProperty.review_note && (
               <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-800">
-                <b>{t('review_note')}:</b> {property.review_note}
+                <b>{t('review_note')}:</b> {displayProperty.review_note}
               </div>
             )}
           </div>

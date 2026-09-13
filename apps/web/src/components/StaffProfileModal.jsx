@@ -37,8 +37,22 @@ import {
 } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 
-const StaffProfileModal = ({ user, onClose, onRefresh }) => {
+const StaffProfileModal = ({ user: userProp, onClose, onRefresh }) => {
   const { t, lang } = useLanguage();
+
+  // Keep rendering the last non-null profile while the dialog closes, so the
+  // <Dialog> stays mounted throughout and Radix runs its own close animation
+  // and body-pointer-events cleanup, instead of the whole subtree being
+  // yanked out mid-open by an early `return null` — which is what was
+  // leaving the admin dashboard frozen/unclickable. Every other reference to
+  // `user` below intentionally keeps using this derived value; only the
+  // Dialog's own `open` prop tracks the real `userProp`.
+  const [lastUser, setLastUser] = useState(userProp);
+  useEffect(() => {
+    if (userProp) setLastUser(userProp);
+  }, [userProp]);
+  const user = userProp || lastUser;
+
   const [perms, setPerms] = useState({});
   const [role, setRole] = useState('admin');
   const [staffLabel, setStaffLabel] = useState('');
@@ -213,7 +227,7 @@ const StaffProfileModal = ({ user, onClose, onRefresh }) => {
   };
 
   return (
-    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={!!userProp} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t('edit_staff_title')}</DialogTitle>

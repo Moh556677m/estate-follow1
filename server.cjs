@@ -9,6 +9,53 @@ const pbHooksPath = path.join(pocketbaseDir, 'pb_hooks');
 const pbMigrationsPath = path.join(pocketbaseDir, 'pb_migrations');
 const POCKETBASE_URL = process.env.POCKETBASE_URL || 'http://127.0.0.1:8090';
 
+// --- Load apps/api/.env into process.env, BEFORE anything else runs -------
+// apps/api's own package.json only ever loads that file via
+// `node --env-file=.env` (its "dev"/"start" scripts) — but self-hosted
+// Hostinger's "Setup Node.js App" feature runs `node server.cjs` directly,
+// which never goes through that script. Without this, secrets that only
+// live in apps/api/.env (RESEND_API_KEY, CLOUDINARY_*, ANTHROPIC_API_KEY,
+// etc.) never reach process.env at all in production — not for the API
+// module imported below (Step 2), and not for the PocketBase child process
+// spawned further down (spawnPocketbase() passes it `env: process.env`).
+// This was the actual root cause of OTP/verification emails silently never
+// sending on self-hosted Hostinger: RESEND_API_KEY was only ever documented
+// for apps/api/.env, but PocketBase's own mailer hook
+// (pb_hooks/0-resend-mailer.pb.js) reads it from ITS OWN process env via
+// $os.getenv(), which — same as the API's env — was never actually
+// populated on this deployment path.
+//
+// Values already set by the host's own env-var panel take priority and are
+// never overwritten here; this only fills in whatever the panel doesn't
+// already provide.
+const apiEnvPath = path.join(__dirname, 'apps', 'api', '.env');
+try {
+  const raw = fs.readFileSync(apiEnvPath, 'utf8');
+  let loaded = 0;
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key && !(key in process.env)) {
+      process.env[key] = value;
+      loaded += 1;
+    }
+  }
+  console.log(`Loaded ${loaded} variable(s) from apps/api/.env into process.env (host panel vars, if any, always win).`);
+} catch (error) {
+  if (error.code === 'ENOENT') {
+    console.log('apps/api/.env not found — skipping (fine if every secret is set via the host env-var panel instead).');
+  } else {
+    console.error('Failed to read apps/api/.env:', error.code, error.message);
+  }
+}
+
 // --- Guard: PB_ENCRYPTION_KEY must be present BEFORE PocketBase is ever
 // spawned. This key must match the ORIGINAL key that was used to encrypt
 // this project's existing pb_data the first time it was created — PocketBase

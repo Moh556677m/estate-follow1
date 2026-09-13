@@ -239,10 +239,24 @@ function PointerEventsGuard() {
         const unlockIfStuck = () => {
             try {
                 if (document.body.style.pointerEvents !== 'none') return;
-                const openModal = document.querySelector(
-                    '[role="dialog"][data-state="open"], [data-state="open"].fixed, [data-state="open"][role="dialog"]',
+                // A stale/orphaned node can keep a data-state="open" attribute
+                // after Radix's own close animation was interrupted (e.g. the
+                // whole dialog subtree was unmounted mid-open instead of being
+                // told open=false — see PropertyReviewModal/UserProfileModal/
+                // StaffProfileModal) without ever being removed from the DOM.
+                // Such a node isn't actually visible, so checking for its mere
+                // presence (as this guard used to) made the lock permanent
+                // instead of self-healing. Only a candidate that is connected
+                // AND actually has layout size counts as "genuinely open".
+                const candidates = document.querySelectorAll(
+                    '[role="dialog"][data-state="open"], [data-state="open"].fixed',
                 );
-                if (openModal) return; // a modal is genuinely open — body lock is correct
+                const genuinelyOpen = Array.from(candidates).some((el) => {
+                    if (!el.isConnected) return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                });
+                if (genuinelyOpen) return; // a modal is genuinely open and visible — body lock is correct
                 document.body.style.pointerEvents = '';
                 document.body.removeAttribute('data-scroll-locked');
             } catch {

@@ -451,10 +451,21 @@ const AppLayout = ({
       try {
         if (mobileOpen) return;
         if (document.body.style.pointerEvents !== 'none') return;
-        const openModal = document.querySelector(
+        // See the matching guard in App.jsx: a stale/orphaned dialog node can
+        // keep a data-state="open" attribute after an abrupt unmount skipped
+        // Radix's own close cleanup, without ever being removed from the DOM.
+        // Only count a candidate as "genuinely open" if it's connected AND
+        // actually has layout size — otherwise this safety net never fires
+        // and the page stays permanently unclickable instead of self-healing.
+        const candidates = document.querySelectorAll(
           '[role="dialog"][data-state="open"], [data-state="open"].fixed',
         );
-        if (openModal) return;
+        const genuinelyOpen = Array.from(candidates).some((el) => {
+          if (!el.isConnected) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
+        if (genuinelyOpen) return;
         document.body.style.pointerEvents = '';
       } catch {
         /* ignore */
