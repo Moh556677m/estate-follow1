@@ -22,6 +22,17 @@ describe('cleanEnvValue', () => {
     expect(cleanEnvValue(undefined)).toBe('');
     expect(cleanEnvValue(null)).toBe('');
   });
+
+  it('strips invisible Unicode formatting characters a copy-paste can carry along', () => {
+    // Built from explicit code points (never literal invisible characters
+    // in this test source either) — see supabaseClient.js's own comment.
+    const zeroWidthSpace = String.fromCharCode(0x200b);
+    const bom = String.fromCharCode(0xfeff);
+    const wordJoiner = String.fromCharCode(0x2060);
+    expect(cleanEnvValue(`${bom}https://xxx.supabase.co`)).toBe('https://xxx.supabase.co');
+    expect(cleanEnvValue(`https://xxx${zeroWidthSpace}.supabase.co`)).toBe('https://xxx.supabase.co');
+    expect(cleanEnvValue(`https://xxx.supabase.co${wordJoiner}`)).toBe('https://xxx.supabase.co');
+  });
 });
 
 describe('isValidSupabaseUrl', () => {

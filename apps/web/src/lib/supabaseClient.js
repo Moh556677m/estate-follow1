@@ -18,15 +18,35 @@ import { createClient } from '@supabase/supabase-js';
 // forwards just these two (non-secret) values via `define` at build time —
 // see the comment there. The secret key is never touched by vite.config.js
 // or referenced anywhere in this file/folder.
-// Defensive cleanup: a value pasted into a hosting panel's env-var field
-// often carries surrounding quotes ("https://xxx.supabase.co") or trailing
-// whitespace/newline — either passes straight through to createClient()
-// unless stripped here, and Supabase's internal URL building then produces
-// a malformed request path (surfacing across every auth call as something
-// like "Invalid path specified in request URL") instead of a clear
-// config error. Trimmed and unquoted once, here, for both values.
+
+// Zero-width / formatting Unicode characters a copy-paste from a web page
+// can silently carry along — invisible to the eye, NOT removed by a plain
+// .trim() (they are not "whitespace" per the JS spec), and enough on their
+// own to make Supabase's internal request-path building fail with
+// something like "Invalid path specified in request URL" on every single
+// auth call, with no visible clue why. Built from explicit numeric code
+// points (never literal invisible characters in this source file) so this
+// is reviewable and can never itself become a source of the exact class of
+// invisible-character bug it exists to strip: U+200B zero width space,
+// U+200C zero width non-joiner, U+200D zero width joiner, U+2060 word
+// joiner, U+FEFF BOM / zero width no-break space.
+const INVISIBLE_CODE_POINTS = [0x200b, 0x200c, 0x200d, 0x2060, 0xfeff];
+const INVISIBLE_CHARS_PATTERN = new RegExp(
+  '[' + INVISIBLE_CODE_POINTS.map((cp) => String.fromCharCode(cp)).join('') + ']',
+  'g',
+);
+
+/**
+ * Defensive cleanup: a value pasted into a hosting panel's env-var field
+ * often carries surrounding quotes ("https://xxx.supabase.co"), trailing
+ * whitespace/newline, or an invisible Unicode character from a copy-paste
+ * — any of these passes straight through to createClient() unless stripped
+ * here. Trimmed and unquoted once, here, for both SUPABASE_URL and
+ * SUPABASE_PUBLISHABLE_KEY.
+ */
 export function cleanEnvValue(raw) {
-  let value = String(raw || '').trim();
+  let value = String(raw || '');
+  value = value.replace(INVISIBLE_CHARS_PATTERN, '').trim();
   if (
     value.length >= 2 &&
     ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
