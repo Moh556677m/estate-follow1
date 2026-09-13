@@ -27,7 +27,13 @@ const __dirname = path.dirname(__filename);
 // Vite build folder: apps/web/dist
 const webDistPath = path.resolve(__dirname, '../../web/dist');
 
-app.set('trust proxy', true);
+// Self-hosted Hostinger puts exactly one reverse proxy (its platform Node.js
+// app proxy) in front of this server. Trusting only that one hop — instead of
+// `true` (trust the whole X-Forwarded-For chain) — makes req.ip resolve to
+// each visitor's real IP instead of collapsing every visitor onto the same
+// key, which was exhausting globalRateLimit's shared 100-requests/5-minutes
+// budget across ALL traffic and causing "Too many requests" on every request.
+app.set('trust proxy', 1);
 
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught exception:', error);
