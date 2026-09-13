@@ -268,6 +268,9 @@ function IdentityRow({ label, present, number, typeKey, onChanged }) {
         setUpload(null);
         return;
       }
+      // The real reason is logged for debugging only — the UI always shows
+      // the same plain, fixed failure message (see UploadStatus below).
+      console.error('Document upload failed:', err);
       setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(err, t), name: file.name, size: prepared.file.size });
     } finally {
       abortRef.current = null;
@@ -399,6 +402,9 @@ function AddIdentityForm({ hasPassport, hasResidence, hideCancel, onCancel, onDo
         setUpload(null);
         return;
       }
+      // The real reason is logged for debugging only — the UI always shows
+      // the same plain, fixed failure message (see UploadStatus below).
+      console.error('Document upload failed:', e);
       setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(e, t), name: f.name, size: prepared.file.size });
     } finally {
       abortRef.current = null;
@@ -656,6 +662,9 @@ function AdditionalDocRow({ record, typeLabel, onChanged }) {
         setUpload(null);
         return;
       }
+      // The real reason is logged for debugging only — the UI always shows
+      // the same plain, fixed failure message (see UploadStatus below).
+      console.error('Document upload failed:', err);
       setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(err, t), name: file.name, size: prepared.file.size });
     } finally {
       abortRef.current = null;
@@ -806,6 +815,9 @@ function AddAdditionalForm({ onCancel, onDone }) {
         setUpload(null);
         return;
       }
+      // The real reason is logged for debugging only — the UI always shows
+      // the same plain, fixed failure message (see UploadStatus below).
+      console.error('Document upload failed:', e);
       setUpload({ percent: 0, status: 'error', error: uploadErrorMessage(e, t) || t('upload_error_generic'), name: f.name, size: prepared.file.size });
     } finally {
       abortRef.current = null;
@@ -905,13 +917,20 @@ function AddAdditionalForm({ onCancel, onDone }) {
 // no size, no progress bar, no cancel button), a short success confirmation,
 // or a clear error with a retry action.
 // ---------------------------------------------------------------------------
+// Deliberately minimal by design: no percent, no file size, no progress
+// bar — just one of three plain states: "uploading...", "uploaded
+// successfully", or a fixed generic failure message with a retry button.
+// The real per-field/server error (still computed by uploadErrorMessage()
+// at each call site, e.g. for future debugging) is intentionally NOT shown
+// here — only logged to the console — so the end user always sees the
+// same simple, calm message on failure.
 function UploadStatus({ upload, onRetry }) {
   const { t } = useLanguage();
   if (!upload) return null;
   if (upload.status === 'done') {
     return (
       <div className="flex items-center gap-2 text-xs text-emerald-700">
-        <CheckCircle2 size={14} /> {t('identity_doc_replaced')}
+        <CheckCircle2 size={14} /> {t('upload_success')}
       </div>
     );
   }
@@ -920,7 +939,7 @@ function UploadStatus({ upload, onRetry }) {
       <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs text-red-700 min-w-0">
           <AlertCircle size={14} className="shrink-0" />
-          <span className="truncate">{upload.error}</span>
+          <span className="truncate">{t('upload_error_generic')}</span>
         </span>
         <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 rounded-lg border border-red-300 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 min-h-[28px] shrink-0">
           <RefreshCw size={12} /> {t('upload_retry')}
@@ -928,11 +947,11 @@ function UploadStatus({ upload, onRetry }) {
       </div>
     );
   }
-  // uploading / preparing — just the picked file name, uploading quietly.
+  // uploading / preparing — a plain "uploading..." status, nothing else.
   return (
     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
       <Loader2 size={12} className="animate-spin shrink-0" />
-      <span className="truncate">{upload.name}</span>
+      <span className="truncate">{t('identity_uploading')}</span>
     </div>
   );
 }

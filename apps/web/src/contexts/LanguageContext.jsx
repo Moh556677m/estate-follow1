@@ -1956,6 +1956,7 @@ const translations = {
     additional_file_required: 'Please pick a file.',
 
     // ---- Unified upload system ----
+    upload_success: 'Uploaded successfully.',
     upload_error_generic: 'Could not upload the file, please try again.',
     upload_cancelled: 'Upload cancelled.',
     upload_timeout: 'Upload timed out. Try again.',
@@ -4393,6 +4394,7 @@ const translations = {
     additional_file_required: 'يرجى اختيار ملف.',
 
     // ---- نظام رفع الملفات الموحد ----
+    upload_success: 'تم الرفع بنجاح.',
     upload_error_generic: 'تعذر رفع الملف، حاول مرة أخرى.',
     upload_cancelled: 'تم إلغاء الرفع.',
     upload_timeout: 'انتهت مهلة الرفع. حاول مرة أخرى.',
