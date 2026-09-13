@@ -9,6 +9,7 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import AnalyticsTracker from './components/AnalyticsTracker';
+import ErrorBoundary from './components/ErrorBoundary';
 import { StaffRoute } from './components/StaffRoute';
 import pb from './lib/pocketbaseClient';
 import { applySiteIcon, DEFAULT_SITE_ICON_URL, DEFAULT_SITE_ICON_VERSION } from './lib/siteIcon';
@@ -514,6 +515,7 @@ function App() {
                     <CanonicalHostRedirect />
                     <BrandLoader />
                     <AnalyticsTracker />
+                    <ErrorBoundary>
                     <Suspense fallback={<RouteLoadingFallback />}>
                     <Routes>
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -606,6 +608,7 @@ function App() {
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                     </Suspense>
+                    </ErrorBoundary>
                 </Router>
             </AuthProvider>
         </LanguageProvider>

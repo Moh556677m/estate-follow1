@@ -4,9 +4,6 @@ import {
   ArrowRight,
   Bell,
   Building2,
-  ChevronDown,
-  ChevronUp,
-  GripVertical,
   LogOut,
   Menu,
   Package,
@@ -19,7 +16,6 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import pb from '@/lib/pocketbaseClient';
 import { roleDisplay } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
-import useSidebarOrder from '@/hooks/useSidebarOrder';
 import OwnerMobileBottomNav from '@/components/OwnerMobileBottomNav';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
@@ -28,16 +24,20 @@ export { LanguageSwitcher };
 
 /**
  * Sidebar header — a single organized row at the top of every sidebar:
- *   [ X close ]      [ logo + platform name ]      [ Arrange ]
- * The X sits on the physical left, the logo/brand name is restored to its
- * natural centered place, and the Arrange button sits on the right (slightly
- * clearer styling, sized just right, never dominating). The row is forced to
- * LTR so the physical left/right placement is identical on every page, every
- * account type, and every device — while the brand text keeps its own
- * language direction. The X only closes the sidebar (mobile drawer / desktop
- * collapse) — it never saves or triggers any other action.
+ *   [ X close ]      [ logo + platform name ]
+ * The X sits on the physical left and the logo/brand name is centered. The
+ * row is forced to LTR so the physical left/right placement is identical on
+ * every page, every account type, and every device — while the brand text
+ * keeps its own language direction. The X only closes the sidebar (mobile
+ * drawer / desktop collapse) — it never triggers any other action.
+ *
+ * The sidebar order used to be user-customizable here (drag-and-drop
+ * "Arrange" mode). That feature was removed entirely — the sidebar is now
+ * always the same fixed order for everyone, with no per-user state,
+ * localStorage, or backend setting behind it (see useSidebarOrder.js's own
+ * comment, and SidebarManagementPanel.jsx's removal from AdminDashboard.jsx).
  */
-function SidebarHeader({ onClose, onArrange, arranging, t }) {
+function SidebarHeader({ onClose, t }) {
   const { lang } = useLanguage();
   const [plat, setPlat] = useState(() => window.__EF_PLATFORM__ || null);
 
@@ -98,22 +98,6 @@ function SidebarHeader({ onClose, onArrange, arranging, t }) {
           </span>
         </div>
 
-        {/* Center-left: bare Arrange (small icon + label, not adjacent to name) */}
-        <button
-          type="button"
-          onClick={onArrange}
-          aria-pressed={arranging}
-          className={cn(
-            'inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors min-h-[40px]',
-            arranging
-              ? 'text-primary'
-              : 'text-muted-foreground hover:text-primary',
-          )}
-        >
-          <GripVertical size={15} strokeWidth={2} />
-          {t('sidebar_arrange')}
-        </button>
-
         {/* Far left: small, elegant X close (no box / border / background) */}
         <button
           type="button"
@@ -122,61 +106,6 @@ function SidebarHeader({ onClose, onArrange, arranging, t }) {
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-primary min-h-[40px] min-w-[40px]"
         >
           <X size={16} strokeWidth={1.8} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Reorder toolbar shown while in Sidebar Reorder Mode. */
-function ReorderToolbar({
-  t,
-  onSave,
-  onReset,
-  onCancel,
-  saving,
-  feedback,
-}) {
-  return (
-    <div className="space-y-3 border-b px-3 py-3 bg-accent/40">
-      <div>
-        <p className="text-sm font-bold">{t('sidebar_reorder_title')}</p>
-        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          {t('sidebar_reorder_hint')}
-        </p>
-      </div>
-
-      {feedback === 'saved' && (
-        <p className="text-[11px] font-semibold text-emerald-700">{t('sidebar_order_saved')}</p>
-      )}
-      {feedback === 'error' && (
-        <p className="text-[11px] font-semibold text-destructive">{t('sidebar_order_error')}</p>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60 min-h-[40px]"
-        >
-          {saving ? t('loading') : t('sidebar_save_order')}
-        </button>
-        <button
-          type="button"
-          onClick={onReset}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-60 min-h-[40px]"
-        >
-          {t('sidebar_reset_default')}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent disabled:opacity-60 min-h-[40px]"
-        >
-          {t('sidebar_cancel_reorder')}
         </button>
       </div>
     </div>
@@ -212,35 +141,20 @@ const AppLayout = ({
   const [unread, setUnread] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [dragIndex, setDragIndex] = useState(null);
 
-  // Collapsible groups (e.g. owner "Management") — derived from navItems
-  // that carry a `children` array. Passed to the order hook so children can be
-  // reordered within their group only.
-  const groups = useMemo(() => {
+  // The sidebar order is always the fixed, code-defined order for everyone —
+  // no per-user drag-and-drop customization, no persisted state (see
+  // useSidebarOrder.js's own comment for why that feature was removed).
+  // Collapsible groups (e.g. owner "Management") are still derived from
+  // navItems that carry a `children` array.
+  const orderedItems = navItems;
+  const orderedChildren = useMemo(() => {
     const g = {};
     navItems.forEach((n) => {
       if (n.children && n.children.length) g[n.key] = n.children;
     });
     return g;
   }, [navItems]);
-
-  const {
-    orderedItems,
-    orderedChildren,
-    localItems,
-    localChildrenItems,
-    reorderMode,
-    setReorderMode,
-    move,
-    moveToIndex,
-    moveChild,
-    saveOrder,
-    resetOrder,
-    cancelReorder,
-    saving,
-    feedback,
-  } = useSidebarOrder({ scope, navItems, groups });
 
   const resolvePath = (item) => item.path || `${basePath}/${item.key}`;
 
@@ -331,14 +245,6 @@ const AppLayout = ({
     navigate(basePath === '/admin' ? '/admin/login' : '/login');
   };
 
-  /** Exit reorder mode without saving — used before any real navigation. */
-  const exitReorderIfNeeded = () => {
-    if (reorderMode) {
-      setDragIndex(null);
-      cancelReorder();
-    }
-  };
-
   const isActionItem = (item) =>
     !!item && (item.action === 'add-property' || item.key === 'add-property');
 
@@ -367,7 +273,6 @@ const AppLayout = ({
    * throwing side-effect can never block the <Link>'s own navigation.
    */
   const go = (itemOrKey, evt) => {
-    exitReorderIfNeeded();
     const item =
       typeof itemOrKey === 'string'
         ? flatItems.find((n) => n.key === itemOrKey) || { key: itemOrKey }
@@ -424,9 +329,6 @@ const AppLayout = ({
   const handleSheetOpenChange = (open) => {
     setMobileOpen(open);
     if (!open) {
-      // Closing the drawer must never leave reorder/drag state active.
-      setDragIndex(null);
-      if (reorderMode) cancelReorder();
       // Radix Dialog can leave body { pointer-events: none } after close,
       // which silently blocks every click on the page (sidebar included).
       requestAnimationFrame(() => {
@@ -481,24 +383,6 @@ const AppLayout = ({
     location.pathname === basePath ||
     location.pathname === `${basePath}/`;
 
-  const onDragStart = (idx) => (e) => {
-    // Only allow drag inside explicit reorder mode.
-    if (!reorderMode) {
-      e.preventDefault();
-      return;
-    }
-    setDragIndex(idx);
-  };
-  const onDragOver = (idx) => (e) => {
-    if (!reorderMode) return;
-    e.preventDefault();
-    if (dragIndex !== null && dragIndex !== idx) {
-      moveToIndex(dragIndex, idx);
-      setDragIndex(idx);
-    }
-  };
-  const onDragEnd = () => setDragIndex(null);
-
   const navItemClass = (isActive, indent = false) =>
     cn(
       'relative z-[1] flex w-full items-center gap-3 rounded-lg py-2.5 text-sm transition-colors text-start min-h-[44px] pointer-events-auto touch-manipulation select-none',
@@ -527,8 +411,7 @@ const AppLayout = ({
   };
 
   const renderNav = () => {
-    // Reorder UI is opt-in only; normal mode never mounts drag handlers/overlays.
-    const items = reorderMode ? localItems : orderedItems;
+    const items = orderedItems;
     return (
       <nav
         className="relative z-[1] flex flex-col gap-1 pointer-events-auto"
@@ -541,82 +424,7 @@ const AppLayout = ({
           const hasChildren = !!(item.children && item.children.length);
           const isOpen = openGroups.has(item.key);
 
-          if (reorderMode) {
-            const childList = localChildrenItems[item.key] || item.children || [];
-            return (
-              <div key={item.key} className="space-y-1">
-                <div
-                  draggable
-                  onDragStart={onDragStart(idx)}
-                  onDragOver={onDragOver(idx)}
-                  onDragEnd={onDragEnd}
-                  className="flex items-center gap-2 rounded-lg border bg-card px-2.5 py-2 text-sm min-h-[44px] cursor-grab active:cursor-grabbing"
-                >
-                  <GripVertical size={15} className="text-muted-foreground shrink-0" />
-                  <Icon className="shrink-0" strokeWidth={1.8} size={16} />
-                  <span className="flex-1 truncate">{item.label}</span>
-                  <div className="flex flex-col gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => move(item.key, 'up')}
-                      disabled={idx === 0}
-                      aria-label={t('sidebar_move_up')}
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
-                    >
-                      <ChevronUp size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => move(item.key, 'down')}
-                      disabled={idx === items.length - 1}
-                      aria-label={t('sidebar_move_down')}
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
-                    >
-                      <ChevronDown size={14} />
-                    </button>
-                  </div>
-                </div>
-                {hasChildren && (
-                  <div className="flex flex-col gap-1 ps-5">
-                    {childList.map((child, cidx) => {
-                      const CIcon = child.icon;
-                      return (
-                        <div
-                          key={child.key}
-                          className="flex items-center gap-2 rounded-lg border bg-accent/30 px-2.5 py-1.5 text-sm min-h-[40px]"
-                        >
-                          <CIcon className="shrink-0" strokeWidth={1.8} size={14} />
-                          <span className="flex-1 truncate text-muted-foreground">{child.label}</span>
-                          <div className="flex flex-col gap-0.5">
-                            <button
-                              type="button"
-                              onClick={() => moveChild(item.key, child.key, 'up')}
-                              disabled={cidx === 0}
-                              aria-label={t('sidebar_move_up')}
-                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
-                            >
-                              <ChevronUp size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moveChild(item.key, child.key, 'down')}
-                              disabled={cidx === childList.length - 1}
-                              aria-label={t('sidebar_move_down')}
-                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
-                            >
-                              <ChevronDown size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          }
-
-          // Normal mode — collapsible group parent (toggle only, no route).
+          // Collapsible group parent (toggle only, no route).
           if (hasChildren) {
             const childList = orderedChildren[item.key] || item.children;
             return (
@@ -699,50 +507,12 @@ const AppLayout = ({
     );
   };
 
-  const toggleArrange = () => {
-    if (reorderMode) {
-      setDragIndex(null);
-      cancelReorder();
-    } else {
-      setReorderMode(true);
-    }
-  };
-
   // The header close target depends on context (mobile drawer vs desktop).
   const desktopHeader = (
-    <SidebarHeader
-      t={t}
-      arranging={reorderMode}
-      onClose={() => {
-        setDragIndex(null);
-        if (reorderMode) cancelReorder();
-        setCollapsed(true);
-      }}
-      onArrange={toggleArrange}
-    />
+    <SidebarHeader t={t} onClose={() => setCollapsed(true)} />
   );
   const mobileHeader = (
-    <SidebarHeader
-      t={t}
-      arranging={reorderMode}
-      onClose={() => handleSheetOpenChange(false)}
-      onArrange={toggleArrange}
-    />
-  );
-
-  const reorderToolbar = (
-    <ReorderToolbar
-      t={t}
-      onSave={saveOrder}
-      onReset={async () => {
-        if (window.confirm(t('sidebar_reset_confirm'))) {
-          await resetOrder();
-        }
-      }}
-      onCancel={cancelReorder}
-      saving={saving}
-      feedback={feedback}
-    />
+    <SidebarHeader t={t} onClose={() => handleSheetOpenChange(false)} />
   );
 
   return (
@@ -765,7 +535,6 @@ const AppLayout = ({
         {...(basePath === '/admin' ? { 'data-ef-admin': 'true' } : {})}
       >
         {desktopHeader}
-        {reorderMode && reorderToolbar}
         <div className="relative z-[1] flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 pointer-events-auto">
           {renderNav()}
         </div>
@@ -822,8 +591,7 @@ const AppLayout = ({
                 {...(basePath === '/admin' ? { 'data-ef-admin': 'true' } : {})}
               >
                 {mobileHeader}
-                {reorderMode && reorderToolbar}
-                <div className="relative z-[1] p-4 pointer-events-auto">{renderNav()}</div>
+                        <div className="relative z-[1] p-4 pointer-events-auto">{renderNav()}</div>
                 <div className="relative z-[1] border-t p-4 pointer-events-auto">
                   <button
                     type="button"

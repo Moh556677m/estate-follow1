@@ -18,14 +18,58 @@ import { createClient } from '@supabase/supabase-js';
 // forwards just these two (non-secret) values via `define` at build time —
 // see the comment there. The secret key is never touched by vite.config.js
 // or referenced anywhere in this file/folder.
-const SUPABASE_URL = import.meta.env.SUPABASE_URL || '';
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.SUPABASE_PUBLISHABLE_KEY || '';
+// Defensive cleanup: a value pasted into a hosting panel's env-var field
+// often carries surrounding quotes ("https://xxx.supabase.co") or trailing
+// whitespace/newline — either passes straight through to createClient()
+// unless stripped here, and Supabase's internal URL building then produces
+// a malformed request path (surfacing across every auth call as something
+// like "Invalid path specified in request URL") instead of a clear
+// config error. Trimmed and unquoted once, here, for both values.
+export function cleanEnvValue(raw) {
+  let value = String(raw || '').trim();
+  if (
+    value.length >= 2 &&
+    ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+}
 
-export const isSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
+const SUPABASE_URL = cleanEnvValue(import.meta.env.SUPABASE_URL);
+const SUPABASE_PUBLISHABLE_KEY = cleanEnvValue(import.meta.env.SUPABASE_PUBLISHABLE_KEY);
+
+// Beyond "is it set", the URL must actually be a valid, absolute
+// http(s) URL — a bare domain (missing "https://"), a relative path, or
+// any other malformed value would otherwise reach Supabase's internal
+// request building and fail deep inside the SDK on every single auth call
+// with a cryptic path error, instead of failing cleanly and visibly here.
+export function isValidSupabaseUrl(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export const isSupabaseConfigured =
+  isValidSupabaseUrl(SUPABASE_URL) && !!SUPABASE_PUBLISHABLE_KEY;
+
+if (!isSupabaseConfigured && (import.meta.env.SUPABASE_URL || import.meta.env.SUPABASE_PUBLISHABLE_KEY)) {
+  // Only warn when a value was actually provided but rejected — an
+  // intentionally unconfigured deployment (neither var set) stays silent.
+  console.error(
+    'Supabase is misconfigured: SUPABASE_URL must be a full http(s) URL and SUPABASE_PUBLISHABLE_KEY must be set. ' +
+      'Regular-user signup/login/session will not work until this is fixed.',
+  );
+}
 
 // A no-op stub when unconfigured (rather than throwing) so the rest of the
 // app can still boot and show a clear error from AuthContext instead of a
-// blank white screen if the env vars are ever missing on a given deploy.
+// blank white screen if the env vars are ever missing/malformed on a given
+// deploy.
 export const supabase = isSupabaseConfigured
   ? createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
       auth: {

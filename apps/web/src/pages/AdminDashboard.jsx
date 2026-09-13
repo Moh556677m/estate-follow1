@@ -79,7 +79,6 @@ const SystemHealthPanel = lazy(() => import('@/components/SystemHealthPanel'));
 const AiInsightsPanel = lazy(() => import('@/components/AiInsightsPanel'));
 const CountriesCitiesPanel = lazy(() => import('@/components/CountriesCitiesPanel'));
 const ReferralAdminPanel = lazy(() => import('@/components/ReferralAdminPanel'));
-const SidebarManagementPanel = lazy(() => import('@/components/SidebarManagementPanel'));
 const AlertsAdminPanel = lazy(() => import('@/components/AlertsAdminPanel'));
 const NotificationManagementPanel = lazy(() => import('@/components/NotificationManagementPanel'));
 const ContentManagementPanel = lazy(() => import('@/components/insights/ContentManagementPanel'));
@@ -138,7 +137,6 @@ const ADMIN_SECTIONS = [
   'estate-ai',
   'referrals',
   'geo',
-  'sidebar-mgmt',
   'alerts',
   'notification-mgmt',
   'content',
@@ -357,12 +355,6 @@ const AdminDashboard = ({ basePath = '/dashboard' }) => {
         key: 'geo',
         icon: Globe2,
         label: lang === 'ar' ? 'الدول والمدن' : 'Countries & Cities',
-        perm: '__super__',
-      },
-      {
-        key: 'sidebar-mgmt',
-        icon: LayoutDashboard,
-        label: lang === 'ar' ? 'إدارة القائمة الجانبية' : 'Sidebar Management',
         perm: '__super__',
       },
       {
@@ -1404,7 +1396,6 @@ const AdminDashboard = ({ basePath = '/dashboard' }) => {
     'estate-ai': () => (isSuperAdmin ? <EstateAiManagementPanel /> : null),
     referrals: () => (isSuperAdmin ? <ReferralAdminPanel /> : null),
     geo: () => (isSuperAdmin ? <CountriesCitiesPanel /> : null),
-    'sidebar-mgmt': () => (isSuperAdmin ? <SidebarManagementPanel /> : null),
     alerts: () => (isSuperAdmin ? <AlertsAdminPanel /> : null),
     'notification-mgmt': () => (isSuperAdmin ? <NotificationManagementPanel /> : null),
     content: () => (isSuperAdmin ? <ContentManagementPanel /> : null),
