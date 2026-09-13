@@ -4,7 +4,22 @@ const path = require('path');
 
 const pocketbaseDir = path.join(__dirname, 'apps', 'pocketbase');
 const pocketbaseBinary = path.join(pocketbaseDir, 'pocketbase');
-const pbDataPath = path.join(pocketbaseDir, 'pb_data');
+// PB_DATA_DIR lets the operator point PocketBase's actual data at a path
+// OUTSIDE this deploy's own directory tree (e.g. a persistent volume/mount
+// Hostinger's plan provides, if any) — the real fix for "user accounts
+// disappear after every deploy" IF the hosting platform's deploy mechanism
+// ever replaces this whole directory with a fresh checkout rather than
+// updating it in place (git-based `git pull`-style deploys leave untracked
+// files like pb_data alone; a fresh-clone-into-a-new-directory style deploy
+// would not). Unset (the default), behavior is completely unchanged —
+// pb_data stays right where it always has, inside this app's own directory.
+// This is intentionally opt-in: which of those two deploy styles Hostinger
+// actually uses cannot be determined from this codebase alone, and forcing
+// a path change without confirming that would risk losing track of
+// existing data rather than protecting it.
+const pbDataPath = process.env.PB_DATA_DIR
+  ? path.resolve(process.env.PB_DATA_DIR)
+  : path.join(pocketbaseDir, 'pb_data');
 const pbHooksPath = path.join(pocketbaseDir, 'pb_hooks');
 const pbMigrationsPath = path.join(pocketbaseDir, 'pb_migrations');
 const POCKETBASE_URL = process.env.POCKETBASE_URL || 'http://127.0.0.1:8090';
@@ -148,6 +163,29 @@ try {
   console.error('pb_data directory writable: FAIL —', error.code, error.message, '| path:', pbDataPath);
 }
 
+// Loud, unmissable signal of exactly the thing "user accounts disappeared
+// after deploy" reports need to distinguish: is this boot finding the SAME
+// database the previous deploy was using, or starting completely fresh?
+// data.db is the actual SQLite file PocketBase's auth/users table lives in
+// — if PB_DATA_DIR is not set and this ever logs "NOT FOUND" right after a
+// redeploy that should have had existing users, that is direct evidence the
+// hosting platform's deploy mechanism is not preserving this directory
+// across deploys (e.g. a fresh-checkout-into-a-new-directory style deploy
+// rather than an in-place git pull) — set PB_DATA_DIR to a path outside
+// this deploy's own directory tree (see its definition above) once such a
+// persistent path is available.
+try {
+  const dbFile = path.join(pbDataPath, 'data.db');
+  if (fs.existsSync(dbFile)) {
+    const dbStat = fs.statSync(dbFile);
+    console.log(`Existing PocketBase database FOUND at ${dbFile} (${dbStat.size} bytes) — this boot will use the SAME data the previous deploy had, not a fresh one.`);
+  } else {
+    console.log(`No existing PocketBase database at ${dbFile} — this boot will create a BRAND NEW, EMPTY database. If users/data were expected to already exist, this is the direct evidence: this deploy did not inherit the previous one's pb_data.`);
+  }
+} catch (error) {
+  console.error('Could not check for an existing PocketBase database:', error.code, error.message);
+}
+
 for (const [label, dirPath] of [['pb_hooks', pbHooksPath], ['pb_migrations', pbMigrationsPath]]) {
   try {
     const entries = fs.readdirSync(dirPath);
@@ -220,7 +258,11 @@ function spawnPocketbase() {
     [
       'serve',
       '--http=127.0.0.1:8090',
-      '--dir=./pb_data',
+      // Always the fully-resolved path (never the literal './pb_data') so
+      // this is correct whether pbDataPath is the default (inside
+      // pocketbaseDir, which IS this spawn's cwd below) or overridden via
+      // PB_DATA_DIR to somewhere else entirely.
+      `--dir=${pbDataPath}`,
       '--hooksDir=./pb_hooks',
       '--migrationsDir=./pb_migrations',
       '--encryptionEnv=PB_ENCRYPTION_KEY'
