@@ -172,7 +172,7 @@ async function ensureAccountType(record) {
  * keeps working against one consistent set of `.code` values regardless of
  * which backend actually handled the request.
  */
-function classifySupabaseError(err) {
+export function classifySupabaseError(err) {
   if (!err) return authError('AUTH_ERROR', 'auth_error');
   const msg = String(err?.message || '').toLowerCase();
   if (msg.includes('invalid login credentials')) return authError('INVALID_CREDENTIALS', err.message);
