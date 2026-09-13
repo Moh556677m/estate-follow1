@@ -479,13 +479,6 @@ const OwnerProfileEditor = () => {
         </div>
       )}
 
-      {/* ---- Identity documents — moved to the very top of the page so it's
-             the first thing the owner sees (previously buried at the bottom,
-             inside the personal-info form). It never depended on that form
-             for submission (it uploads on its own), so lifting it out is
-             purely a layout change. ---- */}
-      <IdentityDocumentsSection status={status} onChanged={load} />
-
       {/* ---- 1) Header: photo + name + status ---- */}
       <div className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center gap-4">
@@ -543,6 +536,13 @@ const OwnerProfileEditor = () => {
           {isApproved && <VerifiedBadge size={18} showLabel />}
         </div>
       </div>
+
+      {/* ---- Identity + additional documents — directly under the photo/
+             name/status card, before the rest of the personal-info fields.
+             It never depended on the form below for submission (it uploads
+             on its own), so keeping it outside that form is a pure layout
+             choice. ---- */}
+      <IdentityDocumentsSection status={status} onChanged={load} />
 
       {/* ---- 2) Personal information ---- */}
       <form
