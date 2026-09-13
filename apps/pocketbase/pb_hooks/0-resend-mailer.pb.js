@@ -91,8 +91,15 @@ onMailerSend((e) => {
   };
 
   const send = (fromAddress, fromName, toField, subject, html, text) => {
-    const apiKey = $os.getenv("RESEND_API_KEY");
-    if (!apiKey || String(apiKey).trim() === "") {
+    // Trimmed once, here, and reused everywhere below (including the
+    // Authorization header) — a stray leading/trailing space or newline in
+    // the panel-stored env var value used to pass this truthiness check
+    // (which only trimmed a COPY for the check, not the value actually
+    // sent) yet still produce an invalid "Bearer <key>" header, so Resend
+    // would reject with 401 while every log/diagnostic still reported the
+    // key as "configured".
+    const apiKey = String($os.getenv("RESEND_API_KEY") || "").trim();
+    if (!apiKey) {
       return { ok: false, reason: "no-key", status: 0 };
     }
     const toList = buildRecipients(toField);
@@ -189,8 +196,15 @@ onMailerRecordOTPSend((e) => {
     // Resend, set RESEND_API_KEY in the PocketBase process env AND verify
     // estatefollow.com in Resend. (A $os.readFile fallback to apps/api/.env was
     // attempted but destabilised the PocketBase process, so it was removed.)
-    const apiKey = $os.getenv("RESEND_API_KEY");
-    if (!apiKey || String(apiKey).trim() === "") {
+    // Trimmed once, here, and reused everywhere below (including the
+    // Authorization header) — a stray leading/trailing space or newline in
+    // the panel-stored env var value used to pass this truthiness check
+    // (which only trimmed a COPY for the check, not the value actually
+    // sent) yet still produce an invalid "Bearer <key>" header, so Resend
+    // would reject with 401 while every log/diagnostic still reported the
+    // key as "configured".
+    const apiKey = String($os.getenv("RESEND_API_KEY") || "").trim();
+    if (!apiKey) {
       $app.logger().warn("OTP email: RESEND_API_KEY not set in PocketBase env — falling back to platform relay");
       return { ok: false, reason: "no-key", status: 0 };
     }
@@ -310,8 +324,15 @@ onMailerRecordVerificationSend((e) => {
   };
 
   const send = (fromAddress, fromName, toField, subject, html, text) => {
-    const apiKey = $os.getenv("RESEND_API_KEY");
-    if (!apiKey || String(apiKey).trim() === "") {
+    // Trimmed once, here, and reused everywhere below (including the
+    // Authorization header) — a stray leading/trailing space or newline in
+    // the panel-stored env var value used to pass this truthiness check
+    // (which only trimmed a COPY for the check, not the value actually
+    // sent) yet still produce an invalid "Bearer <key>" header, so Resend
+    // would reject with 401 while every log/diagnostic still reported the
+    // key as "configured".
+    const apiKey = String($os.getenv("RESEND_API_KEY") || "").trim();
+    if (!apiKey) {
       return { ok: false, reason: "no-key", status: 0 };
     }
     const toList = buildRecipients(toField);
@@ -416,8 +437,15 @@ onMailerRecordPasswordResetSend((e) => {
   };
 
   const send = (fromAddress, fromName, toField, subject, html, text) => {
-    const apiKey = $os.getenv("RESEND_API_KEY");
-    if (!apiKey || String(apiKey).trim() === "") {
+    // Trimmed once, here, and reused everywhere below (including the
+    // Authorization header) — a stray leading/trailing space or newline in
+    // the panel-stored env var value used to pass this truthiness check
+    // (which only trimmed a COPY for the check, not the value actually
+    // sent) yet still produce an invalid "Bearer <key>" header, so Resend
+    // would reject with 401 while every log/diagnostic still reported the
+    // key as "configured".
+    const apiKey = String($os.getenv("RESEND_API_KEY") || "").trim();
+    if (!apiKey) {
       return { ok: false, reason: "no-key", status: 0 };
     }
     const toList = buildRecipients(toField);
@@ -522,8 +550,15 @@ onMailerRecordEmailChangeSend((e) => {
   };
 
   const send = (fromAddress, fromName, toField, subject, html, text) => {
-    const apiKey = $os.getenv("RESEND_API_KEY");
-    if (!apiKey || String(apiKey).trim() === "") {
+    // Trimmed once, here, and reused everywhere below (including the
+    // Authorization header) — a stray leading/trailing space or newline in
+    // the panel-stored env var value used to pass this truthiness check
+    // (which only trimmed a COPY for the check, not the value actually
+    // sent) yet still produce an invalid "Bearer <key>" header, so Resend
+    // would reject with 401 while every log/diagnostic still reported the
+    // key as "configured".
+    const apiKey = String($os.getenv("RESEND_API_KEY") || "").trim();
+    if (!apiKey) {
       return { ok: false, reason: "no-key", status: 0 };
     }
     const toList = buildRecipients(toField);
@@ -629,8 +664,15 @@ onMailerRecordAuthAlertSend((e) => {
   };
 
   const send = (fromAddress, fromName, toField, subject, html, text) => {
-    const apiKey = $os.getenv("RESEND_API_KEY");
-    if (!apiKey || String(apiKey).trim() === "") {
+    // Trimmed once, here, and reused everywhere below (including the
+    // Authorization header) — a stray leading/trailing space or newline in
+    // the panel-stored env var value used to pass this truthiness check
+    // (which only trimmed a COPY for the check, not the value actually
+    // sent) yet still produce an invalid "Bearer <key>" header, so Resend
+    // would reject with 401 while every log/diagnostic still reported the
+    // key as "configured".
+    const apiKey = String($os.getenv("RESEND_API_KEY") || "").trim();
+    if (!apiKey) {
       return { ok: false, reason: "no-key", status: 0 };
     }
     const toList = buildRecipients(toField);
