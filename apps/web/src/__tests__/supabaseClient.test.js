@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cleanEnvValue, isValidSupabaseUrl } from '@/lib/supabaseClient';
+import { cleanEnvValue, isValidSupabaseUrl, toOriginOnly } from '@/lib/supabaseClient';
 
 // Regression guard for "Invalid path specified in request URL" appearing
 // across every Auth flow (signup/login/forgot/reset) — the most likely
@@ -32,6 +32,36 @@ describe('cleanEnvValue', () => {
     expect(cleanEnvValue(`${bom}https://xxx.supabase.co`)).toBe('https://xxx.supabase.co');
     expect(cleanEnvValue(`https://xxx${zeroWidthSpace}.supabase.co`)).toBe('https://xxx.supabase.co');
     expect(cleanEnvValue(`https://xxx.supabase.co${wordJoiner}`)).toBe('https://xxx.supabase.co');
+  });
+});
+
+describe('toOriginOnly', () => {
+  // Regression guard for the actual root cause found for "Invalid path
+  // specified in request URL" appearing on every auth call: SUPABASE_URL
+  // configured with a trailing path (most commonly, someone pastes the "JWT
+  // issuer" URL from Supabase's JWT Settings page, which ends in "/auth/v1",
+  // into the Project URL field). supabase-js always appends its own
+  // "/auth/v1/..." on top of whatever origin+path it's given, so a
+  // path already present there gets duplicated into ".../auth/v1/auth/v1/..."
+  // on every single signup/login/forgot/reset call.
+  it('strips a trailing /auth/v1 path (the JWT-issuer-URL mistake)', () => {
+    expect(toOriginOnly('https://xxx.supabase.co/auth/v1')).toBe('https://xxx.supabase.co');
+  });
+
+  it('strips any other trailing path/query/hash, keeping only the origin', () => {
+    expect(toOriginOnly('https://xxx.supabase.co/rest/v1')).toBe('https://xxx.supabase.co');
+    expect(toOriginOnly('https://xxx.supabase.co/?foo=bar')).toBe('https://xxx.supabase.co');
+    expect(toOriginOnly('https://xxx.supabase.co#hash')).toBe('https://xxx.supabase.co');
+  });
+
+  it('leaves a plain project URL unchanged', () => {
+    expect(toOriginOnly('https://xxx.supabase.co')).toBe('https://xxx.supabase.co');
+    expect(toOriginOnly('https://xxx.supabase.co/')).toBe('https://xxx.supabase.co');
+  });
+
+  it('passes through an empty/invalid value untouched', () => {
+    expect(toOriginOnly('')).toBe('');
+    expect(toOriginOnly('not a url')).toBe('not a url');
   });
 });
 

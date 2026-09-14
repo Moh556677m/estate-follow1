@@ -174,6 +174,23 @@ async function ensureAccountType(record) {
  */
 export function classifySupabaseError(err) {
   if (!err) return authError('AUTH_ERROR', 'auth_error');
+  // Every Supabase Auth call (signUp/signInWithPassword/verifyOtp/
+  // resetPasswordForEmail/updateUser) funnels its error through here — log
+  // the full raw error object (status, name, full message, stack) so the
+  // real cause of an unrecognized failure is visible in the browser console
+  // immediately, at the moment it actually happens, instead of needing to
+  // reproduce it again under DevTools' Network tab afterwards.
+  try {
+    console.error('[Supabase auth error]', {
+      name: err?.name,
+      status: err?.status,
+      code: err?.code,
+      message: err?.message,
+      raw: err,
+    });
+  } catch {
+    /* logging must never itself break the auth flow */
+  }
   const msg = String(err?.message || '').toLowerCase();
   if (msg.includes('invalid login credentials')) return authError('INVALID_CREDENTIALS', err.message);
   if (msg.includes('email not confirmed')) return authError('ACCOUNT_PENDING', err.message);
@@ -207,6 +224,11 @@ async function bridgeToPocketbase(supabaseAccessToken) {
     data = null;
   }
   if (!res.ok || !data?.token || !data?.record) {
+    try {
+      console.error('[PocketBase auth-bridge error]', { status: res.status, url: res.url, data });
+    } catch {
+      /* logging must never itself break the auth flow */
+    }
     const err = new Error(data?.message || 'Could not start your session.');
     err.status = res.status;
     err.code = data?.message === 'ACCOUNT_SUSPENDED' ? 'ACCOUNT_SUSPENDED' : undefined;

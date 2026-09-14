@@ -56,7 +56,48 @@ export function cleanEnvValue(raw) {
   return value;
 }
 
-const SUPABASE_URL = cleanEnvValue(import.meta.env.SUPABASE_URL);
+/**
+ * A Supabase "Project URL" must be an origin with NO path/query/hash —
+ * exactly "https://<ref>.supabase.co", nothing after it. supabase-js
+ * appends its own suffix on top of whatever is configured here
+ * (GoTrueClient uses `${url}/auth/v1`, PostgrestClient uses `${url}/rest/v1`,
+ * etc.) — if a path is already present (the single most common real-world
+ * mistake: pasting the "JWT issuer" value shown on Supabase's JWT Settings
+ * page, `https://<ref>.supabase.co/auth/v1`, into the Project URL field
+ * instead of the plain project URL), every request ends up with that
+ * segment duplicated, e.g. ".../auth/v1/auth/v1/token?grant_type=password".
+ * Supabase's edge gateway rejects a request shaped like that with exactly
+ * "Invalid path specified in request URL" — on EVERY auth call, since every
+ * one of them goes through this same `${url}/auth/v1/...` construction,
+ * which matches this exact, previously unexplained production symptom.
+ * Rather than only detecting this, normalize it away: keep just the origin
+ * and warn loudly if anything else was present, so a pasted "JWT issuer"
+ * URL (or any other URL-with-a-path) self-heals instead of silently
+ * breaking every single signup/login/forgot/reset call.
+ */
+export function toOriginOnly(value) {
+  if (!value) return value;
+  try {
+    const parsed = new URL(value);
+    const hasExtra = (parsed.pathname && parsed.pathname !== '/') || parsed.search || parsed.hash;
+    if (hasExtra) {
+      console.error(
+        '[Supabase config] SUPABASE_URL has a path/query after the domain ' +
+          '("' + value + '") — Supabase Project URLs must be just the origin, ' +
+          'e.g. "https://xxxxx.supabase.co" with nothing after it. A common ' +
+          'cause: pasting the "JWT issuer" URL from Supabase\'s JWT Settings ' +
+          'page (which ends in "/auth/v1") instead of the plain Project URL. ' +
+          'Using "' + parsed.origin + '" instead so auth keeps working, but ' +
+          'the env var should be corrected to remove the extra path.',
+      );
+    }
+    return parsed.origin;
+  } catch {
+    return value;
+  }
+}
+
+const SUPABASE_URL = toOriginOnly(cleanEnvValue(import.meta.env.SUPABASE_URL));
 const SUPABASE_PUBLISHABLE_KEY = cleanEnvValue(import.meta.env.SUPABASE_PUBLISHABLE_KEY);
 
 // Beyond "is it set", the URL must actually be a valid, absolute
@@ -85,6 +126,25 @@ if (!isSupabaseConfigured && (import.meta.env.SUPABASE_URL || import.meta.env.SU
       'Regular-user signup/login/session will not work until this is fixed.',
   );
 }
+
+// Self-diagnosing on every page load (not just on failure): the URL itself
+// is not secret (only the key would be), so it's safe to print in full.
+// JSON.stringify (not a plain template string) is deliberate — it makes an
+// invisible character or unexpected quoting visible in the printed value
+// itself (e.g. "​" or an embedded escaped quote), and reports the raw
+// character length so a copy-paste artifact shows up as a length mismatch
+// even if it renders identically to the real value. This is what should be
+// pasted back for diagnosis instead of re-guessing blind: open DevTools
+// Console on any page load and read this line.
+console.info(
+  '[Supabase config]',
+  JSON.stringify({
+    configured: isSupabaseConfigured,
+    url: SUPABASE_URL || null,
+    urlLength: SUPABASE_URL.length,
+    publishableKeyLength: SUPABASE_PUBLISHABLE_KEY.length,
+  }),
+);
 
 // A no-op stub when unconfigured (rather than throwing) so the rest of the
 // app can still boot and show a clear error from AuthContext instead of a
