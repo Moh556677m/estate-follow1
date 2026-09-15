@@ -54,6 +54,15 @@ vi.mock('@/lib/supabaseClient', () => ({
       signUp: vi.fn(),
       signOut: vi.fn().mockResolvedValue({ error: null }),
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+      // Supabase's own OTP/email primitives — regular-user Signup/Forgot
+      // Password must NEVER call any of these (Resend owns that email
+      // entirely now, via apps/api/src/routes/user-otp.js). Present here
+      // only so a regression that starts calling them fails loudly instead
+      // of throwing "not a function".
+      resend: vi.fn(),
+      resetPasswordForEmail: vi.fn(),
+      verifyOtp: vi.fn(),
+      updateUser: vi.fn(),
     },
   },
 }));
@@ -193,5 +202,144 @@ describe('login() portal separation (regression guard)', () => {
       '/auth/bridge',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+});
+
+describe('Signup/Forgot-Password OTP is Resend-only (regression guard)', () => {
+  // Regular-user OTP must be generated, stored and delivered entirely by
+  // apps/api's own Resend integration (routes/user-otp.js) — never by
+  // Supabase's built-in signUp/resend/resetPasswordForEmail/verifyOtp,
+  // which would send a second, parallel email through Supabase's own
+  // mailer. These tests assert the Supabase Auth OTP primitives are never
+  // called anywhere in these flows.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pb.authStore.clear();
+  });
+
+  const setup = async () => {
+    const { AuthProvider, useAuth } = await import('@/contexts/AuthContext');
+    const React = await import('react');
+    const { renderHook, act } = await import('@testing-library/react');
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: ({ children }) => React.createElement(AuthProvider, null, children),
+    });
+    return { result, act };
+  };
+
+  it('signup() calls only /user-otp/signup/start — never supabase.auth.signUp', async () => {
+    apiServerClient.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const { result, act } = await setup();
+
+    await act(async () => {
+      await result.current.signup('new@user.com', 'password123!');
+    });
+
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/signup/start',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(supabase.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('verifySignupOtp() verifies via our backend, then signs in + bridges — never supabase.auth.verifyOtp', async () => {
+    apiServerClient.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, userId: 'u1' }) }) // /signup/verify
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ token: 'pb-token', record: { id: 'owner1', role: 'owner', email: 'new@user.com' } }),
+      }); // /auth/bridge
+    supabase.auth.signInWithPassword.mockResolvedValueOnce({
+      data: { session: { access_token: 'sb-token' } },
+      error: null,
+    });
+    const { result, act } = await setup();
+
+    await act(async () => {
+      await result.current.verifySignupOtp('new@user.com', '123456', 'password123!');
+    });
+
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/signup/verify',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(supabase.auth.signInWithPassword).toHaveBeenCalledWith({
+      email: 'new@user.com',
+      password: 'password123!',
+    });
+    expect(supabase.auth.verifyOtp).not.toHaveBeenCalled();
+    expect(supabase.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('resendSignupOtp() calls only /user-otp/signup/resend — never supabase.auth.resend', async () => {
+    apiServerClient.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const { result, act } = await setup();
+
+    await act(async () => {
+      await result.current.resendSignupOtp('new@user.com');
+    });
+
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/signup/resend',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(supabase.auth.resend).not.toHaveBeenCalled();
+  });
+
+  it('requestPasswordReset() / resendPasswordResetOtp() call only /user-otp/reset/* — never supabase.auth.resetPasswordForEmail', async () => {
+    apiServerClient.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const { result, act } = await setup();
+
+    await act(async () => {
+      await result.current.requestPasswordReset('user@x.com');
+      await result.current.resendPasswordResetOtp('user@x.com');
+    });
+
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/reset/start',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/reset/resend',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(supabase.auth.resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+
+  it('verifyPasswordResetOtp() returns a resetTicket and never opens a Supabase recovery session', async () => {
+    apiServerClient.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, resetTicket: 'ticket-abc' }),
+    });
+    const { result, act } = await setup();
+
+    let returned;
+    await act(async () => {
+      returned = await result.current.verifyPasswordResetOtp('user@x.com', '654321');
+    });
+
+    expect(returned).toEqual({ resetTicket: 'ticket-abc' });
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/reset/verify',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(supabase.auth.verifyOtp).not.toHaveBeenCalled();
+  });
+
+  it('completePasswordReset() sends the ticket to /user-otp/reset/complete — never supabase.auth.updateUser', async () => {
+    apiServerClient.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const { result, act } = await setup();
+
+    await act(async () => {
+      await result.current.completePasswordReset('user@x.com', 'ticket-abc', 'newPassword123!');
+    });
+
+    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+      '/user-otp/reset/complete',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(supabase.auth.updateUser).not.toHaveBeenCalled();
   });
 });

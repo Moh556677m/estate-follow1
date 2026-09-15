@@ -567,36 +567,69 @@ export const AuthProvider = ({ children }) => {
         return { record };
       },
       // Regular-user signup only (admin/staff accounts are created from the
-      // admin panel directly against PocketBase — unrelated to this). Sends
-      // Supabase's own signup confirmation email (configure that project's
-      // "Confirm signup" email template to send a {{ .Token }} OTP code to
-      // keep the existing 6-digit-code UI in SignupPage.jsx working, or a
-      // {{ .ConfirmationURL }} link if the OTP screen is dropped instead).
+      // admin panel directly against PocketBase — unrelated to this).
+      //
+      // The OTP code is generated, stored and sent ENTIRELY by our own
+      // backend via Resend (apps/api/src/utils/userOtp.js +
+      // routes/user-otp.js) — Supabase's own built-in signup email is never
+      // triggered anywhere in this flow. The Supabase user itself is only
+      // actually created once the code is verified (see verifySignupOtp
+      // below), via the Admin API (which never sends any email of its own
+      // either), so Supabase stays responsible for identity/session only —
+      // never for sending mail.
       signup: async (email, password) => {
+        const normalized = normalizeEmail(email);
+        const pass = String(password ?? '');
+        if (!normalized || !pass) throw authError('INVALID_CREDENTIALS');
+        const res = await apiServerClient.fetch('/user-otp/signup/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalized }),
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok || !data?.ok) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not send the verification code.');
+        }
+        return data;
+      },
+      // Verifies the Resend-delivered code against our own backend; on
+      // success the backend creates the real Supabase user (email_confirm:
+      // true — Resend already proved this mailbox, so no second
+      // confirmation email is ever sent). This function then signs in with
+      // the same password to get a normal Supabase session and bridges it
+      // to PocketBase exactly like login() does.
+      verifySignupOtp: async (email, token, password) => {
         if (!isSupabaseConfigured) {
           throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
         }
         const normalized = normalizeEmail(email);
         const pass = String(password ?? '');
-        if (!normalized || !pass) throw authError('INVALID_CREDENTIALS');
-        const { data, error } = await supabase.auth.signUp({ email: normalized, password: pass });
-        if (error) throw classifySupabaseError(error);
-        return data;
-      },
-      // Verifies the signup confirmation code and completes sign-in in one
-      // step (Supabase returns a real session from a successful verifyOtp).
-      verifySignupOtp: async (email, token) => {
-        if (!isSupabaseConfigured) {
-          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        const res = await apiServerClient.fetch('/user-otp/signup/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalized, code: String(token || '').trim(), password: pass }),
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
         }
-        const normalized = normalizeEmail(email);
-        const { data, error } = await supabase.auth.verifyOtp({
+        if (!res.ok || !data?.ok) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not verify the code.');
+        }
+
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({
           email: normalized,
-          token: String(token || '').trim(),
-          type: 'signup',
+          password: pass,
         });
         if (error) throw classifySupabaseError(error);
-        const record = await bridgeToPocketbase(data.session.access_token);
+        const record = await bridgeToPocketbase(signInData.session.access_token);
         setUser(record);
         try {
           await registerSession();
@@ -606,57 +639,105 @@ export const AuthProvider = ({ children }) => {
         return record;
       },
       resendSignupOtp: async (email) => {
-        if (!isSupabaseConfigured) {
-          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
-        }
-        const { error } = await supabase.auth.resend({
-          type: 'signup',
-          email: normalizeEmail(email),
+        const normalized = normalizeEmail(email);
+        const res = await apiServerClient.fetch('/user-otp/signup/resend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalized }),
         });
-        if (error) throw classifySupabaseError(error);
-      },
-      // Forgot / reset password — regular users only, entirely via Supabase.
-      requestPasswordReset: async (email) => {
-        if (!isSupabaseConfigured) {
-          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
         }
-        const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email));
-        if (error) throw classifySupabaseError(error);
+        if (!res.ok || !data?.ok) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not resend the code.');
+        }
+      },
+      // Forgot / reset password — regular users only. Same Resend-only
+      // system as signup above; Supabase's own recovery email is never
+      // triggered. Password is actually changed via the Admin API once our
+      // own OTP verifies — see routes/user-otp.js.
+      requestPasswordReset: async (email) => {
+        const normalized = normalizeEmail(email);
+        const res = await apiServerClient.fetch('/user-otp/reset/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalized }),
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok || !data?.ok) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not send the reset code.');
+        }
       },
       resendPasswordResetOtp: async (email) => {
-        if (!isSupabaseConfigured) {
-          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
-        }
-        const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email));
-        if (error) throw classifySupabaseError(error);
-      },
-      // Verifies the reset code — this opens a temporary Supabase "recovery"
-      // session (not bridged/signed-in yet) just enough to allow setting a
-      // new password next.
-      verifyPasswordResetOtp: async (email, token) => {
-        if (!isSupabaseConfigured) {
-          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
-        }
         const normalized = normalizeEmail(email);
-        const { data, error } = await supabase.auth.verifyOtp({
-          email: normalized,
-          token: String(token || '').trim(),
-          type: 'recovery',
+        const res = await apiServerClient.fetch('/user-otp/reset/resend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalized }),
         });
-        if (error) throw classifySupabaseError(error);
-        return data;
-      },
-      // Sets the new password on the temporary recovery session opened by
-      // verifyPasswordResetOtp, then signs it out — the user signs in fresh
-      // afterwards with their new password, exactly like the old PocketBase
-      // OTP-reset flow did.
-      completePasswordReset: async (newPassword) => {
-        if (!isSupabaseConfigured) {
-          throw authError('AUTH_ERROR', 'Supabase is not configured on this deployment.');
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
         }
-        const { error } = await supabase.auth.updateUser({ password: String(newPassword || '') });
-        if (error) throw classifySupabaseError(error);
-        await supabase.auth.signOut().catch(() => {});
+        if (!res.ok || !data?.ok) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not resend the code.');
+        }
+      },
+      // Verifies the reset code against our own backend (single-use — this
+      // consumes it) and returns a short-lived opaque ticket for the next
+      // step (choosing a new password) to present instead of the code
+      // again. Not a Supabase session of any kind.
+      verifyPasswordResetOtp: async (email, token) => {
+        const normalized = normalizeEmail(email);
+        const res = await apiServerClient.fetch('/user-otp/reset/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalized, code: String(token || '').trim() }),
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok || !data?.ok || !data?.resetTicket) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not verify the code.');
+        }
+        return { resetTicket: data.resetTicket };
+      },
+      // Spends the ticket from verifyPasswordResetOtp to actually change the
+      // password via the Admin API. The user signs in fresh afterwards with
+      // their new password, exactly like the old PocketBase OTP-reset flow.
+      completePasswordReset: async (email, resetTicket, newPassword) => {
+        const normalized = normalizeEmail(email);
+        const res = await apiServerClient.fetch('/user-otp/reset/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: normalized,
+            resetTicket: String(resetTicket || ''),
+            newPassword: String(newPassword || ''),
+          }),
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        if (!res.ok || !data?.ok) {
+          throw authError(data?.code || 'AUTH_ERROR', data?.message || 'Could not reset your password.');
+        }
       },
       logout: async () => {
         try {

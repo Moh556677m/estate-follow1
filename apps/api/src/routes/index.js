@@ -15,6 +15,7 @@ import documentSharesRouter from './document-shares.js';
 import siteIssuesRouter from './site-issues.js';
 import supabaseDiagnosticsRouter from './supabase-diagnostics.js';
 import supabaseAuthBridgeRouter from './supabase-auth-bridge.js';
+import userOtpRouter from './user-otp.js';
 
 const router = Router();
 
@@ -57,6 +58,11 @@ export default () => {
     // with a Supabase access token, not a PocketBase one. See the file
     // header for the full explanation.
     router.use('/auth/bridge', supabaseAuthBridgeRouter);
+    // Regular-user Signup / Forgot-Password OTP — Resend sends the email,
+    // Supabase Auth owns the resulting identity (see user-otp.js header for
+    // the full explanation). Deliberately public, same reasoning as the
+    // bridge above.
+    router.use('/user-otp', userOtpRouter);
 
     return router;
 };

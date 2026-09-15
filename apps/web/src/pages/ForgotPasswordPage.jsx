@@ -39,6 +39,7 @@ const ForgotPasswordPage = () => {
 
   // OTP state
   const [otpId, setOtpId] = useState('');
+  const [resetTicket, setResetTicket] = useState('');
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [secondsLeft, setSecondsLeft] = useState(OTP_DURATION);
   const [otpError, setOtpError] = useState('');
@@ -134,6 +135,7 @@ const ForgotPasswordPage = () => {
     setCode(['', '', '', '', '', '']);
     setOtpError('');
     setOtpInfo('');
+    setResetTicket('');
   };
 
   const verifyOtp = async () => {
@@ -150,10 +152,12 @@ const ForgotPasswordPage = () => {
     }
     setVerifying(true);
     try {
-      // Opens a temporary Supabase "recovery" session — proves the code is
-      // correct, just enough to set a new password next. Not a real
-      // sign-in: no PocketBase bridging happens here.
-      await verifyPasswordResetOtp(email.trim(), entered);
+      // Consumes the single-use code and returns a short-lived ticket that
+      // proves it was correct — presented instead of the code again for
+      // the next step. Not a sign-in of any kind: no PocketBase bridging
+      // happens here.
+      const { resetTicket: ticket } = await verifyPasswordResetOtp(email.trim(), entered);
+      setResetTicket(ticket);
       setStep('password');
     } catch (err) {
       if (err?.code === 'OTP_INVALID') {
@@ -179,7 +183,7 @@ const ForgotPasswordPage = () => {
     }
     setResetting(true);
     try {
-      await completePasswordReset(newPassword);
+      await completePasswordReset(email.trim(), resetTicket, newPassword);
       setStep('done');
     } catch (err) {
       setPwError(err?.message || t('something_wrong'));

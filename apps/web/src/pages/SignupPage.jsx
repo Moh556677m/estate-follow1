@@ -262,10 +262,11 @@ const SignupPage = () => {
     }
     setVerifying(true);
     try {
-      // 1) Verify the Supabase signup code — this both proves the email and
-      //    returns a real Supabase session, which verifySignupOtp() bridges
-      //    into a real PocketBase session (pb.authStore) in one step.
-      await verifySignupOtp(form.email.trim(), entered);
+      // 1) Verify the Resend-delivered signup code — this both proves the
+      //    email and creates+signs-in the real Supabase user, which
+      //    verifySignupOtp() bridges into a real PocketBase session
+      //    (pb.authStore) in one step.
+      await verifySignupOtp(form.email.trim(), entered, form.password);
 
       // 2) Commit the profile fields the signup form collected (name,
       //    nationality, gender, phone, referral) onto that same PocketBase
