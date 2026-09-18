@@ -347,6 +347,17 @@ export function uploadErrorMessage(err, t) {
   }
   if (err.status === 401) return t ? t('upload_auth_retry') : 'Session expired — please retry.';
   if (err.status === 403) return t ? t('upload_forbidden') : 'Not allowed.';
+  // PocketBase returns a bare 404 ("The requested resource wasn't found.")
+  // both for a genuinely unmatched route AND for a record id that no
+  // longer exists in the target collection — reproduced live: a browser
+  // holding an old cached session whose user record id no longer resolves
+  // (e.g. after the underlying data was reset) gets exactly this on any
+  // upload targeting "their own" record, even though the request itself
+  // is correctly formed. Retrying the same upload can never succeed in
+  // that case — the fix is signing out and back in for a fresh session,
+  // not trying again with the same one, so this is treated the same as an
+  // expired session (401) rather than left as an unexplained "not found".
+  if (err.status === 404) return t ? t('upload_auth_retry') : 'Session expired — please retry.';
   // Every other status (400 validation, 404, 409, 422, 5xx, ...) used to
   // always collapse into the generic "upload failed, try again" message,
   // discarding PocketBase's own structured validation response — e.g.

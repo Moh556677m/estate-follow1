@@ -917,19 +917,16 @@ function AddAdditionalForm({ onCancel, onDone }) {
 // no size, no progress bar, no cancel button), a short success confirmation,
 // or a clear error with a retry action.
 // ---------------------------------------------------------------------------
-// Shows the REAL reason a failed upload failed (already computed by
-// uploadErrorMessage()/prepareFile() at each call site — file too large,
-// wrong type, session expired, not allowed, or the server's own validation
-// message) instead of one fixed generic string for every possible cause.
-// This used to collapse everything into "Could not upload the file, try
-// again" with the real reason only ever reaching the browser console — an
-// owner (or Estate Follow's own team testing this) had no way to tell a
-// too-large file from an expired session from an actual server outage,
-// which made this exact failure impossible to diagnose or self-correct
-// without opening DevTools. uploadErrorMessage() already returns a
-// reasonably clear, translated string for every common case; it only ever
-// falls through to a raw server message for a genuinely unexpected one —
-// which is still far more useful than no information at all.
+// Deliberately minimal by design: no percent, no file size, no progress
+// bar — just one of three plain states: "uploading...", "uploaded
+// successfully", or a fixed, calm Arabic/English failure message with a
+// retry button. The real per-field/server error (still computed by
+// uploadErrorMessage() at each call site, e.g. for future debugging) is
+// intentionally NOT shown here — only logged to the console — so the end
+// user never sees a raw technical/English error. (A brief window during
+// this project's own debugging temporarily showed the real reason here to
+// track down a live production bug — root-caused and reverted back to
+// this original, intended design once the real cause was found.)
 function UploadStatus({ upload, onRetry }) {
   const { t } = useLanguage();
   if (!upload) return null;
@@ -945,7 +942,7 @@ function UploadStatus({ upload, onRetry }) {
       <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs text-red-700 min-w-0">
           <AlertCircle size={14} className="shrink-0" />
-          <span className="truncate">{upload.error || t('upload_error_generic')}</span>
+          <span className="truncate">{t('upload_error_generic')}</span>
         </span>
         <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 rounded-lg border border-red-300 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 min-h-[28px] shrink-0">
           <RefreshCw size={12} /> {t('upload_retry')}
