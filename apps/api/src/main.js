@@ -85,8 +85,10 @@ app.use(
           "'self'",
           "'unsafe-inline'", // apps/web/index.html's own small inline scripts (see above)
           'https://www.googletagmanager.com', // Google Analytics (gtag.js)
-          'https://www.clarity.ms', // Microsoft Clarity
+          'https://www.clarity.ms', // Microsoft Clarity's own loader...
+          'https://scripts.clarity.ms', // ...which then loads the real tracker from this separate subdomain
           'https://cdn.onesignal.com', // OneSignal push-notification SDK
+          'https://api.onesignal.com', // OneSignal's own JSONP-style sync call (loaded as a <script>, not fetch)
           'https://www.google.com', // reCAPTCHA v3 (login/signup/forgot-password)
         ],
         connectSrc: [
@@ -95,8 +97,10 @@ app.use(
           'https://www.google-analytics.com',
           'https://www.googletagmanager.com',
           'https://cdn.onesignal.com',
+          'https://api.onesignal.com',
           'https://onesignal.com',
           'https://www.clarity.ms',
+          'https://scripts.clarity.ms',
           'https://www.google.com', // reCAPTCHA v3's own token verification calls
           'https://*.supabase.co', // kept for a Supabase-bridged legacy session, if any (see AuthContext.jsx)
           'wss://*.supabase.co',

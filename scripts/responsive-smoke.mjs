@@ -167,7 +167,12 @@ async function checkAdminSidebar(browser) {
   try {
     await page.waitForURL(/\/admin\/overview/, { timeout: 15000 });
   } catch {
-    fail(`Admin login did not reach /admin/overview (still on ${page.url()}).`);
+    const bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+    fail(
+      `Admin login did not reach /admin/overview (still on ${page.url()}). ` +
+        `Console errors: ${consoleErrors.slice(0, 5).join(' | ') || '(none)'} ` +
+        `Visible page text: ${bodyText.slice(0, 300).replace(/\s+/g, ' ')}`,
+    );
     await context.close();
     return;
   }
