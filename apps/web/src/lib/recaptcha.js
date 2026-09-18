@@ -121,7 +121,7 @@ async function getToken(action) {
  *   ok=true  → safe to proceed with the form submission.
  *   ok=false → explicit bot signal; block the form and surface a message.
  */
-export async function verifyRecaptcha(action) {
+async function runVerification(action) {
     // 1. Mint a token. If the script can't load or execute (ad blocker,
     //    network, domain not registered in the reCAPTCHA admin), fail OPEN.
     let token = null;
@@ -181,6 +181,34 @@ export async function verifyRecaptcha(action) {
     // registered, expired/duplicate token, invalid key). Configuration or
     // transient issue, not a bot signal. Fail open.
     return { ok: true, score: data?.score ?? null, reason };
+}
+
+// Absolute outer deadline for the whole flow (script load + execute() +
+// backend verify), on top of every individual timeout already inside
+// runVerification(). This is deliberately redundant: a live CI run proved
+// that even with the internal getToken()/loadRecaptcha() timeouts in place,
+// the observed hang was still real — some stage of this chain can outlast
+// its own supposed timeout in a specific network environment (e.g. Google's
+// reCAPTCHA backend behaving differently for a data-center/CI IP range than
+// a residential one). Rather than keep chasing the exact internal stage,
+// this guarantees the one contract that actually matters: verifyRecaptcha()
+// NEVER makes a caller wait more than this long, full stop — a real human
+// must never be stuck on a spinner because of this module, for any reason.
+const ABSOLUTE_TIMEOUT_MS = 10000;
+
+export async function verifyRecaptcha(action) {
+    try {
+        return await Promise.race([
+            runVerification(action),
+            new Promise((resolve) =>
+                setTimeout(() => resolve({ ok: true, score: null, reason: 'verification_timeout' }), ABSOLUTE_TIMEOUT_MS),
+            ),
+        ]);
+    } catch {
+        // Belt-and-suspenders — runVerification() already catches everything
+        // it knows how to, but this function must never throw regardless.
+        return { ok: true, score: null, reason: 'unexpected_error' };
+    }
 }
 
 export default verifyRecaptcha;
