@@ -38,7 +38,6 @@ import DateField from '@/components/DateField';
 import VerifiedBadge from '@/components/VerifiedBadge';
 import IdentityDocumentsSection from '@/components/IdentityDocumentsSection';
 import { safeSyncAuthRecord, compressImage } from '@/lib/uploadClient';
-import { mirrorProfileToSupabase } from '@/lib/supabaseClient';
 import { ensureFreshToken, withAuthRetry } from '@/lib/authRefresh';
 import { cn } from '@/lib/utils';
 import {
@@ -328,7 +327,6 @@ const OwnerProfileEditor = () => {
       // Reflect the updated record into the auth store WITHOUT ever clearing
       // it — a save failure cannot log the user out.
       safeSyncAuthRecord(updated);
-      mirrorProfileToSupabase(updated);
 
       if (submit) {
         await submitVerification();
@@ -396,7 +394,6 @@ const OwnerProfileEditor = () => {
         }),
       );
       safeSyncAuthRecord(updated);
-      mirrorProfileToSupabase(updated);
 
       // Server-side re-validation + flips profile_complete / account_state.
       await completeBasicProfile();

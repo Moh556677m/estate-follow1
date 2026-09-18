@@ -102,8 +102,6 @@ app.use(
           'https://www.clarity.ms',
           'https://scripts.clarity.ms',
           'https://www.google.com', // reCAPTCHA v3's own token verification calls
-          'https://*.supabase.co', // kept for a Supabase-bridged legacy session, if any (see AuthContext.jsx)
-          'wss://*.supabase.co',
         ],
         styleSrc: [
           "'self'",

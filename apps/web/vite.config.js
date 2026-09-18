@@ -369,18 +369,6 @@ logger.error = (msg, options) => {
 }
 
 export default defineConfig({
-	// Forward ONLY the two non-secret Supabase build-time values into the
-	// browser bundle as import.meta.env.*. Vite normally only exposes
-	// VITE_-prefixed env vars automatically; the project's real env var
-	// names (set in Hostinger) are SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY
-	// with no VITE_ prefix, so this explicit allow-list forwards exactly
-	// those two by name — nothing else. SUPABASE_SECRET_KEY is never
-	// referenced here (or anywhere else under apps/web) and can never end
-	// up in the frontend bundle this way.
-	define: {
-		'import.meta.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || ''),
-		'import.meta.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(process.env.SUPABASE_PUBLISHABLE_KEY || ''),
-	},
 	optimizeDeps: {
 		include: allDeps,
 	},

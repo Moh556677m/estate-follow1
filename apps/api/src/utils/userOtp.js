@@ -1,11 +1,7 @@
 // Regular-user OTP challenge/response, backed by Resend for delivery and
 // the `auth_otps` PocketBase collection (superuser-only, see
 // pb_migrations/1792200000_add_user_otp_collection.js) for storage — NOT
-// Supabase's own built-in email/OTP system, and NOT PocketBase's own
-// users-collection request-otp/authWithOTP flow. Supabase Auth is only
-// ever touched afterwards (by the routes in user-otp.js), once a code
-// verified here proves the caller owns the mailbox — this file never
-// imports supabaseClient.js at all.
+// PocketBase's own users-collection request-otp/authWithOTP flow.
 //
 // The raw 6-digit code is NEVER stored, logged, or returned by any
 // function here — only a salted SHA-256 hash of it. It exists in memory

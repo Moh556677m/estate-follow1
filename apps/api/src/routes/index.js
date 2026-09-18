@@ -13,8 +13,6 @@ import integrationsRouter, { publicScriptStatusRouter } from './integrations.js'
 import portfolioAdvisorRouter from './portfolio-advisor.js';
 import documentSharesRouter from './document-shares.js';
 import siteIssuesRouter from './site-issues.js';
-import supabaseDiagnosticsRouter from './supabase-diagnostics.js';
-import supabaseAuthBridgeRouter from './supabase-auth-bridge.js';
 import userOtpRouter from './user-otp.js';
 
 const router = Router();
@@ -50,18 +48,11 @@ export default () => {
     // Task #23 — Site Issues. /report is public (see file header); everything
     // else in this router requires Super Admin.
     router.use('/site-issues', siteIssuesRouter);
-    // Supabase migration — Super-Admin-only diagnostic (see file header for
-    // why this exists and what it does/doesn't touch).
-    router.use('/supabase-diagnostics', supabaseDiagnosticsRouter);
-    // Supabase Auth -> PocketBase session bridge (regular users only — admin
-    // auth is untouched). Deliberately public: the caller proves identity
-    // with a Supabase access token, not a PocketBase one. See the file
-    // header for the full explanation.
-    router.use('/auth/bridge', supabaseAuthBridgeRouter);
     // Regular-user Signup / Forgot-Password OTP — Resend sends the email,
-    // Supabase Auth owns the resulting identity (see user-otp.js header for
-    // the full explanation). Deliberately public, same reasoning as the
-    // bridge above.
+    // PocketBase's own users collection owns the resulting identity
+    // directly (see user-otp.js header for the full explanation).
+    // Deliberately public — these are the pre-authentication steps of
+    // signing up / resetting a forgotten password.
     router.use('/user-otp', userOtpRouter);
 
     return router;

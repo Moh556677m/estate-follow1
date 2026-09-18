@@ -43,12 +43,10 @@ routerAdd(
     // the count only increments when the referred account is later approved.
     const referredBy = String(body.referred_by || body['referred_by'] || '').trim();
 
-    // Password is OPTIONAL here: a Supabase-bridged account (see
-    // apps/api/src/routes/supabase-auth-bridge.js) never logs into
-    // PocketBase directly — its PocketBase password is a random throwaway
-    // set once at bridge time and never used again, so there is nothing
-    // useful to "finalize" here for that case. The legacy PocketBase-OTP
-    // signup flow still sends a real password and gets it set as before.
+    // Password is OPTIONAL here: the real password is already set at
+    // account-creation time (see routes/user-otp.js's /signup/verify), so
+    // there is normally nothing left to set here — only re-set it if one
+    // was actually provided.
     if (password || passwordConfirm) {
       if (!password || password.length < 10) {
         throw new BadRequestError('Password must be at least 10 characters.');

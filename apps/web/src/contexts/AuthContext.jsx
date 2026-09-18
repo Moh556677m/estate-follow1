@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import pb from '@/lib/pocketbaseClient';
-import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import apiServerClient from '@/lib/apiServerClient';
 import {
   registerSession,
@@ -166,78 +165,6 @@ async function ensureAccountType(record) {
   }
 }
 
-/**
- * Map a Supabase Auth error to the same stable client codes classifyAuthError
- * produces, so every existing caller (LoginPage/SignupPage/ForgotPasswordPage)
- * keeps working against one consistent set of `.code` values regardless of
- * which backend actually handled the request.
- */
-export function classifySupabaseError(err) {
-  if (!err) return authError('AUTH_ERROR', 'auth_error');
-  // Every Supabase Auth call (signUp/signInWithPassword/verifyOtp/
-  // resetPasswordForEmail/updateUser) funnels its error through here — log
-  // the full raw error object (status, name, full message, stack) so the
-  // real cause of an unrecognized failure is visible in the browser console
-  // immediately, at the moment it actually happens, instead of needing to
-  // reproduce it again under DevTools' Network tab afterwards.
-  try {
-    console.error('[Supabase auth error]', {
-      name: err?.name,
-      status: err?.status,
-      code: err?.code,
-      message: err?.message,
-      raw: err,
-    });
-  } catch {
-    /* logging must never itself break the auth flow */
-  }
-  const msg = String(err?.message || '').toLowerCase();
-  if (msg.includes('invalid login credentials')) return authError('INVALID_CREDENTIALS', err.message);
-  if (msg.includes('email not confirmed')) return authError('ACCOUNT_PENDING', err.message);
-  if (msg.includes('already registered') || msg.includes('already been registered')) {
-    return authError('ACCOUNT_EXISTS', err.message);
-  }
-  if (msg.includes('rate limit')) return authError('AUTH_ERROR', err.message);
-  if (msg.includes('token has expired') || msg.includes('invalid') && msg.includes('otp')) {
-    return authError('OTP_INVALID', err.message);
-  }
-  return authError('AUTH_ERROR', err.message || 'auth_error');
-}
-
-/**
- * Exchange a Supabase access token for a real PocketBase session (see
- * apps/api/src/routes/supabase-auth-bridge.js for the full explanation of
- * why this exists). On success, populates pb.authStore directly — every
- * OTHER piece of this app that reads pb.authStore/useAuth().user keeps
- * working completely unchanged, because as far as PocketBase is concerned
- * this is a completely normal auth session.
- */
-async function bridgeToPocketbase(supabaseAccessToken) {
-  const res = await apiServerClient.fetch('/auth/bridge', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${supabaseAccessToken}` },
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-  if (!res.ok || !data?.token || !data?.record) {
-    try {
-      console.error('[PocketBase auth-bridge error]', { status: res.status, url: res.url, data });
-    } catch {
-      /* logging must never itself break the auth flow */
-    }
-    const err = new Error(data?.message || 'Could not start your session.');
-    err.status = res.status;
-    err.code = data?.message === 'ACCOUNT_SUSPENDED' ? 'ACCOUNT_SUSPENDED' : undefined;
-    throw err;
-  }
-  pb.authStore.save(data.token, data.record);
-  return data.record;
-}
-
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(pb.authStore.record);
   const [bootstrapped, setBootstrapped] = useState(!pb.authStore.isValid);
@@ -250,39 +177,11 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let cancelled = false;
 
-    // Regular users now authenticate via Supabase (see login() below) — its
-    // own session lives in its own storage, separate from pb.authStore. On a
-    // fresh page load with no PocketBase token yet (or one that has since
-    // expired), a still-valid Supabase session is the real signal that this
-    // browser is actually signed in — re-bridge it to get a fresh PocketBase
-    // token instead of treating this as "logged out". Skipped entirely when
-    // pb.authStore is ALREADY valid (an admin/staff session — pure
-    // PocketBase, no Supabase involved at all — or a regular user whose
-    // bridged token from earlier this tab session is still fresh), so this
-    // never disturbs that existing, working path.
-    const restoreFromSupabase = async () => {
-      if (pb.authStore.isValid || !isSupabaseConfigured) return false;
-      try {
-        const { data } = await supabase.auth.getSession();
-        const token = data?.session?.access_token;
-        if (!token) return false;
-        const record = await bridgeToPocketbase(token);
-        if (cancelled) return true;
-        assertAccountAllowed(record);
-        setUser(record);
-        setBootstrapped(true);
-        return true;
-      } catch {
-        // No valid Supabase session, or bridging failed — fall through to
-        // the plain "not signed in" path below exactly as before.
-        return false;
-      }
-    };
-
+    // No PocketBase token at all on this fresh page load — nothing to
+    // restore a session from (every login/signup goes straight through
+    // PocketBase now), so there is genuinely nothing to bootstrap.
     if (!pb.authStore.isValid) {
-      restoreFromSupabase().then((restored) => {
-        if (!restored && !cancelled) setBootstrapped(true);
-      });
+      setBootstrapped(true);
       return () => {
         cancelled = true;
       };
@@ -464,12 +363,8 @@ export const AuthProvider = ({ children }) => {
       // accounts can be rejected server-side for using the wrong one —
       // not just via the client-side isStaff() check each page also does.
       // Regular users ('user', the default) authenticate directly against
-      // PocketBase too now, exactly like admin/staff — the Supabase-bridge
-      // indirection this used to go through has been removed as a
-      // dependency for new logins (bridgeToPocketbase/restoreFromSupabase
-      // above are kept only so a session created during the period this app
-      // did use Supabase still resolves, never as something a new login
-      // goes through).
+      // PocketBase too, exactly like admin/staff — the same collection,
+      // same mechanism, for every account type.
       login: async (email, password, { portal = 'user' } = {}) => {
         const normalized = normalizeEmail(email);
         const pass = String(password ?? '');
@@ -526,12 +421,9 @@ export const AuthProvider = ({ children }) => {
       //
       // The OTP code is generated, stored and sent ENTIRELY by our own
       // backend via Resend (apps/api/src/utils/userOtp.js +
-      // routes/user-otp.js) — Supabase's own built-in signup email is never
-      // triggered anywhere in this flow. The Supabase user itself is only
+      // routes/user-otp.js). The real PocketBase user itself is only
       // actually created once the code is verified (see verifySignupOtp
-      // below), via the Admin API (which never sends any email of its own
-      // either), so Supabase stays responsible for identity/session only —
-      // never for sending mail.
+      // below).
       signup: async (email, password) => {
         const normalized = normalizeEmail(email);
         const pass = String(password ?? '');
@@ -609,9 +501,8 @@ export const AuthProvider = ({ children }) => {
         }
       },
       // Forgot / reset password — regular users only. Same Resend-only
-      // system as signup above; Supabase's own recovery email is never
-      // triggered. Password is actually changed via the Admin API once our
-      // own OTP verifies — see routes/user-otp.js.
+      // system as signup above. Password is actually changed once our own
+      // OTP verifies — see routes/user-otp.js.
       requestPasswordReset: async (email) => {
         const normalized = normalizeEmail(email);
         const res = await apiServerClient.fetch('/user-otp/reset/start', {
@@ -649,7 +540,7 @@ export const AuthProvider = ({ children }) => {
       // Verifies the reset code against our own backend (single-use — this
       // consumes it) and returns a short-lived opaque ticket for the next
       // step (choosing a new password) to present instead of the code
-      // again. Not a Supabase session of any kind.
+      // again.
       verifyPasswordResetOtp: async (email, token) => {
         const normalized = normalizeEmail(email);
         const res = await apiServerClient.fetch('/user-otp/reset/verify', {
@@ -699,13 +590,6 @@ export const AuthProvider = ({ children }) => {
           /* ignore */
         }
         pb.authStore.clear();
-        if (isSupabaseConfigured) {
-          try {
-            await supabase.auth.signOut();
-          } catch {
-            /* ignore — a failed remote sign-out never blocks a local logout */
-          }
-        }
         setUser(null);
       },
       logoutAll: async () => {
@@ -715,13 +599,6 @@ export const AuthProvider = ({ children }) => {
           /* ignore */
         }
         pb.authStore.clear();
-        if (isSupabaseConfigured) {
-          try {
-            await supabase.auth.signOut();
-          } catch {
-            /* ignore */
-          }
-        }
         setUser(null);
       },
     }),

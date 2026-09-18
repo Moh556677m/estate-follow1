@@ -1,10 +1,11 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // Private backing store for the regular-user Signup/Forgot-Password OTP
-// system (apps/api/src/utils/userOtp.js) — Resend sends the email, Supabase
-// Auth owns the resulting identity/session, and this collection is only
-// ever a short-lived challenge record in between: {email, purpose, otp
-// hash+salt, expiry, attempt count} while a code is pending. It is NEVER
+// system (apps/api/src/utils/userOtp.js) — Resend sends the email,
+// PocketBase's own users collection owns the resulting identity/session,
+// and this collection is only ever a short-lived challenge record in
+// between: {email, purpose, otp hash+salt, expiry, attempt count} while a
+// code is pending. It is NEVER
 // exposed through PocketBase's public REST API in any direction — every
 // rule below is left unset (null), which PocketBase treats as
 // "superuser only". Only apps/api's already-superuser-authenticated

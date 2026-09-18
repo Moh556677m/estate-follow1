@@ -4,10 +4,7 @@
 // see otp-password-reset.pb.js for the reset case), PocketBase is also the
 // backing store for the OTP challenge itself (see utils/userOtp.js for the
 // full explanation of why this exists instead of PocketBase's own
-// users-collection request-otp). Regular users no longer touch Supabase at
-// all — this was previously bridged through Supabase Auth; that indirection
-// is gone, so there is one fewer external dependency and one fewer place a
-// misconfigured/missing third-party credential can break signup or login.
+// users-collection request-otp).
 //
 // Deliberately public (no PocketBase auth middleware) — these are the
 // pre-authentication steps of signing up / resetting a forgotten password.
@@ -22,10 +19,7 @@ const router = Router();
 // A brand-new account has no name/phone/nationality/gender yet — those are
 // collected on the signup form and committed afterward via
 // finalize-signup.pb.js (SignupPage.jsx calls it right after verifySignupOtp
-// succeeds), exactly like the existing Supabase-bridge placeholder pattern
-// this replaces (see the same two constants in
-// supabase-auth-bridge.js — kept identical here for consistency, though
-// that route no longer handles regular users).
+// succeeds).
 const PLACEHOLDER_NATIONALITY = 'PENDING';
 const PLACEHOLDER_GENDER = 'male';
 
@@ -184,18 +178,15 @@ router.post('/signup/verify', otpVerifyRateLimit, async (req, res) => {
 //   1) A genuinely completed account (real profile, finished onboarding) —
 //      block. The user already has an account; tell them to log in instead.
 //
-//   2) An INCOMPLETE placeholder — either this exact signup flow died
-//      somewhere between account creation and finalize-signup on an earlier
-//      attempt (pending_signup still true), OR — the actual root cause hit
-//      in production — a leftover record from the old Supabase-bridge era
-//      (apps/api/src/routes/supabase-auth-bridge.js), which used to
-//      provision a PocketBase placeholder with a RANDOM password the user
-//      never saw, nationality:"PENDING", and pending_signup:false. Either
-//      way, the caller here just proved they own this mailbox RIGHT NOW via
-//      a fresh Resend OTP — so instead of permanently locking them out of
-//      an account with a password nobody knows, reset that record's
-//      password to the one they just typed and let signup continue on the
-//      SAME id. No duplicate account is ever created; nothing is deleted.
+//   2) An INCOMPLETE placeholder — this exact signup flow died somewhere
+//      between account creation and finalize-signup on an earlier attempt
+//      (pending_signup still true, or nationality still the "PENDING"
+//      placeholder). The caller here just proved they own this mailbox
+//      RIGHT NOW via a fresh Resend OTP — so instead of permanently
+//      locking them out of an account with a password nobody remembers,
+//      reset that record's password to the one they just typed and let
+//      signup continue on the SAME id. No duplicate account is ever
+//      created; nothing is deleted.
 //
 // A real, completed account never has nationality === "PENDING" (that
 // value is never reachable through the normal profile-completion flow —
