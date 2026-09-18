@@ -9,7 +9,22 @@
 // ---------------------------------------------------------------------------
 onRecordCreateRequest((e) => {
   const auth = e.requestInfo().auth;
-  const isSuperAdmin = !!auth && auth.getBool("is_super_admin");
+  // A real PocketBase superuser (_superusers collection — the actual
+  // account this platform's own service clients and the PocketBase admin
+  // dashboard itself authenticate as) has NO is_super_admin field at all —
+  // that field only exists on the `users` collection schema. Checking only
+  // auth.getBool("is_super_admin") therefore always evaluated to false for
+  // a genuine superuser token, silently stripping role/is_super_admin off
+  // every admin account it tried to create — including from PocketBase's
+  // own "_/" dashboard. A `users`-collection Super Admin (is_super_admin
+  // = true on their own record) is still recognized exactly as before.
+  let isSuperuserToken = false;
+  try {
+    isSuperuserToken = !!auth && auth.collection().name === "_superusers";
+  } catch (_) {
+    isSuperuserToken = false;
+  }
+  const isSuperAdmin = isSuperuserToken || (!!auth && auth.getBool("is_super_admin"));
   if (!isSuperAdmin) {
     e.record.set("role", "owner");
   }
@@ -45,7 +60,16 @@ onRecordCreateRequest((e) => {
 onRecordUpdateRequest((e) => {
   try {
     const auth = e.requestInfo().auth;
-    const isSuperAdmin = !!auth && auth.getBool("is_super_admin");
+    // See the matching comment on the onRecordCreateRequest hook above — a
+    // real PocketBase superuser (_superusers) token has no is_super_admin
+    // field to check at all, so it must be recognized by collection name.
+    let isSuperuserToken = false;
+    try {
+      isSuperuserToken = !!auth && auth.collection().name === "_superusers";
+    } catch (_) {
+      isSuperuserToken = false;
+    }
+    const isSuperAdmin = isSuperuserToken || (!!auth && auth.getBool("is_super_admin"));
 
     // Only the Super Admin may change role, permissions or is_super_admin.
     // Staff cannot escalate themselves or each other.
