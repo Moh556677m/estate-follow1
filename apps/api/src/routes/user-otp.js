@@ -40,9 +40,32 @@ function isNotUniqueEmailError(err) {
 
 // Stricter than the app-wide globalRateLimit (100/5min) — an OTP endpoint
 // is exactly the kind of thing brute-forcing/hammering targets first.
-const otpRateLimit = rateLimit({
+//
+// Split into two separate limiters instead of one shared across all 7
+// routes below. One shared limiter meant a normal signup (start + maybe a
+// mistyped code + a resend + verify) could burn a real user's entire
+// 10-minute budget on its own, then have nothing left over to try the
+// separate forgot-password flow, or even to retry verify once more — a
+// legitimate user testing this exact sequence hit "Too many requests"
+// after nothing more than normal retries, with no actual abuse involved.
+//
+// otpSendRateLimit guards the routes that actually cost money / carry spam
+// risk (they trigger a real Resend send) — kept at the original strict
+// budget. otpVerifyRateLimit guards routes that only check a code already
+// sent — these can't be used to spam email, and userOtp.js's own
+// per-code MAX_ATTEMPTS=5 lockout already protects against brute-forcing
+// the code itself, so this budget is deliberately more generous.
+const otpSendRateLimit = rateLimit({
 	windowMs: 10 * 60 * 1000,
 	max: 8,
+	standardHeaders: true,
+	legacyHeaders: false,
+	validate: { trustProxy: false },
+	message: { message: 'Too many requests, please try again later.' },
+});
+const otpVerifyRateLimit = rateLimit({
+	windowMs: 10 * 60 * 1000,
+	max: 20,
 	standardHeaders: true,
 	legacyHeaders: false,
 	validate: { trustProxy: false },
@@ -72,7 +95,7 @@ function otpVerifyStatus(code) {
 
 // --- Signup -----------------------------------------------------------
 
-router.post('/signup/start', otpRateLimit, async (req, res) => {
+router.post('/signup/start', otpSendRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	if (!email) return res.status(400).json({ message: 'Email is required.' });
 	try {
@@ -84,7 +107,7 @@ router.post('/signup/start', otpRateLimit, async (req, res) => {
 	}
 });
 
-router.post('/signup/resend', otpRateLimit, async (req, res) => {
+router.post('/signup/resend', otpSendRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	if (!email) return res.status(400).json({ message: 'Email is required.' });
 	try {
@@ -96,7 +119,7 @@ router.post('/signup/resend', otpRateLimit, async (req, res) => {
 	}
 });
 
-router.post('/signup/verify', otpRateLimit, async (req, res) => {
+router.post('/signup/verify', otpVerifyRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	const code = String(req.body?.code || '').trim();
 	const password = String(req.body?.password || '');
@@ -234,7 +257,7 @@ async function findUserByEmail(email) {
 	}
 }
 
-router.post('/reset/start', otpRateLimit, async (req, res) => {
+router.post('/reset/start', otpSendRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	if (!email) return res.status(400).json({ message: 'Email is required.' });
 	try {
@@ -254,7 +277,7 @@ router.post('/reset/start', otpRateLimit, async (req, res) => {
 	return res.json({ ok: true });
 });
 
-router.post('/reset/resend', otpRateLimit, async (req, res) => {
+router.post('/reset/resend', otpSendRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	if (!email) return res.status(400).json({ message: 'Email is required.' });
 	try {
@@ -276,7 +299,7 @@ router.post('/reset/resend', otpRateLimit, async (req, res) => {
 // returns a short-lived opaque ticket for the frontend's separate "choose a
 // new password" step — see issueResetTicket()'s comment for why this can't
 // just be the same code again.
-router.post('/reset/verify', otpRateLimit, async (req, res) => {
+router.post('/reset/verify', otpVerifyRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	const code = String(req.body?.code || '').trim();
 	if (!email || !code) {
@@ -291,7 +314,7 @@ router.post('/reset/verify', otpRateLimit, async (req, res) => {
 	}
 });
 
-router.post('/reset/complete', otpRateLimit, async (req, res) => {
+router.post('/reset/complete', otpVerifyRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	const resetTicket = String(req.body?.resetTicket || '').trim();
 	const newPassword = String(req.body?.newPassword || '');
