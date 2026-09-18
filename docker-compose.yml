@@ -1,0 +1,92 @@
+# Estate Follow — VPS deployment.
+#
+# Every secret/config value below comes from the VPS's own environment via
+# `env_file: .env` (a real file that lives ONLY on the VPS, is gitignored,
+# and is never referenced by name here beyond ".env" itself) — nothing
+# sensitive is written into this file or into the Dockerfile.
+#
+# Traefik on this VPS runs with `network_mode: host` and has no separate
+# named Docker network of its own — so this file does NOT join, require,
+# or create any external network. Traefik's Docker provider discovers this
+# container purely through Docker-socket labels (below) and reaches it
+# directly on its own Compose-created bridge network's IP, which a
+# host-networked Traefik can always route to — no shared network needed,
+# and nothing here touches Traefik's own config or any other project.
+#
+# `docker compose up -d --build` on the VPS is the whole deploy procedure.
+# Required .env keys are documented in .env.example (copy it to .env here
+# and fill in real values — never commit that real file).
+
+services:
+  estate-follow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: estate-follow:latest
+    container_name: estate-follow
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Fixed inside the container: PocketBase's data directory always
+      # lives on the named volume below, never inside the image/build
+      # directory, so a rebuild/redeploy/restart can never touch it.
+      PB_DATA_DIR: /data/pb_data
+      NODE_ENV: production
+    volumes:
+      # Named volume — Docker keeps this on the host independently of the
+      # container's lifecycle. `docker compose down` (no `-v`), a rebuild,
+      # `docker compose up -d --build`, or a container restart/crash all
+      # leave it untouched. Only an explicit `docker volume rm
+      # estate_follow_pb_data` (or `docker compose down -v`) deletes it —
+      # never do that on a real deploy.
+      - pb_data:/data/pb_data
+    ports:
+      # Bound to localhost only — lets you curl/debug directly from the VPS
+      # itself (e.g. over an SSH tunnel) without exposing anything to the
+      # internet. Traefik does NOT use this mapping at all: with
+      # network_mode: host, Traefik's Docker provider talks to this
+      # container's own internal bridge IP:port directly (see the
+      # loadbalancer.server.port label below), bypassing published ports
+      # entirely — so nothing sensitive (PocketBase, the Node API) is ever
+      # reachable from the public internet except through Traefik's own
+      # HTTPS entrypoint.
+      - "127.0.0.1:${PORT:-3001}:${PORT:-3001}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${PORT:-3001}/hcgi/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      # Traefik (host network mode, Docker provider watching the socket)
+      # picks this container up purely from these labels — no shared
+      # network membership required. This container is also only ever on
+      # its own single Compose-created network, so Traefik can resolve its
+      # IP with no ambiguity (traefik.docker.network is only needed when a
+      # container sits on more than one network at once).
+      - "traefik.enable=true"
+
+      # --- Canonical host: estatefollow.com, real traffic -----------------
+      - "traefik.http.routers.estate-follow.rule=Host(`estatefollow.com`)"
+      - "traefik.http.routers.estate-follow.entrypoints=websecure"
+      - "traefik.http.routers.estate-follow.tls=true"
+      - "traefik.http.routers.estate-follow.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.estate-follow.loadbalancer.server.port=${PORT:-3001}"
+
+      # --- www.estatefollow.com: gets its own valid HTTPS cert, then a
+      #     permanent redirect to the canonical apex domain (never a
+      #     second live copy of the app under a different host) ----------
+      - "traefik.http.routers.estate-follow-www.rule=Host(`www.estatefollow.com`)"
+      - "traefik.http.routers.estate-follow-www.entrypoints=websecure"
+      - "traefik.http.routers.estate-follow-www.tls=true"
+      - "traefik.http.routers.estate-follow-www.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.estate-follow-www.middlewares=estate-follow-www-redirect"
+      - "traefik.http.routers.estate-follow-www.service=estate-follow"
+      - "traefik.http.middlewares.estate-follow-www-redirect.redirectregex.regex=^https://www\\.estatefollow\\.com/(.*)"
+      - "traefik.http.middlewares.estate-follow-www-redirect.redirectregex.replacement=https://estatefollow.com/$${1}"
+      - "traefik.http.middlewares.estate-follow-www-redirect.redirectregex.permanent=true"
+
+volumes:
+  pb_data:
+    name: estate_follow_pb_data

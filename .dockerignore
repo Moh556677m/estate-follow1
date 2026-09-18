@@ -1,0 +1,28 @@
+# Never ship real dependencies/build output/secrets/local data into the
+# Docker build context — everything here is either regenerated inside the
+# image (node_modules, dist) or must never leave the host (pb_data, .env).
+
+**/node_modules
+apps/web/dist
+
+# PocketBase's real data — a persistent Docker volume owns this at runtime.
+# Never bake any pb_data into the image, and never let a stray local
+# pb_data on the build machine leak into it either.
+pb_data
+apps/pocketbase/pb_data
+**/pb_data
+
+# Secrets — every real value comes from the VPS's own environment / the
+# untracked .env file docker-compose.yml reads, never from the image.
+.env
+.env.*
+!.env*.example
+
+.git
+.github
+*.log
+smoke-test-server.log
+
+Dockerfile
+docker-compose.yml
+.dockerignore
