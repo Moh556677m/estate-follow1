@@ -1441,6 +1441,16 @@ const UserProfileModal = ({
               <FileText size={15} /> {t('view_documents')}
             </h4>
             <div className="flex flex-wrap gap-2">
+              {/* The owner's actual identity documents (IdentityDocumentsSection.jsx,
+                  the real onboarding/profile upload flow) — passport_file /
+                  residence_file / the legacy single document_file. These are
+                  DIFFERENT fields from passport_pdf/residence_pdf below (an
+                  older, separate pair only ever used for the "reuse across
+                  property listings" feature) — admin had no way to open what
+                  an owner actually uploaded as their ID without these. */}
+              <DocButton record={user} field="passport_file" label={t('identity_passport')} />
+              <DocButton record={user} field="residence_file" label={t('identity_residence')} />
+              <DocButton record={user} field="document_file" label={t('identity_passport')} />
               <DocButton record={user} field="passport_pdf" label={t('passport')} />
               <DocButton record={user} field="residence_pdf" label={t('residence')} />
               {brokerRecord && <DocButton record={brokerRecord} field="passport_pdf" label={t('broker_passport_or_residence')} />}
@@ -1448,7 +1458,7 @@ const UserProfileModal = ({
               {companyRecord && <DocButton record={companyRecord} field="license_pdf" label={t('company_license_pdf')} />}
               {companyRecord && companyRecord.passport_pdf && <DocButton record={companyRecord} field="passport_pdf" label={t('company_owner_passport')} />}
             </div>
-            {!user.passport_pdf && !user.residence_pdf && !brokerRecord?.passport_pdf && !companyRecord?.license_pdf && (
+            {!user.passport_file && !user.residence_file && !user.document_file && !user.passport_pdf && !user.residence_pdf && !brokerRecord?.passport_pdf && !companyRecord?.license_pdf && (
               <p className="text-xs text-muted-foreground">{t('no_documents')}</p>
             )}
           </div>
