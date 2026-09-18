@@ -74,9 +74,26 @@ function loadRecaptcha() {
 }
 
 // Request a reCAPTCHA v3 token for the given action (e.g. 'login').
+//
+// grecaptcha.execute() is assumed elsewhere (see the fail-open comment
+// below) to always either resolve or reject — but for a domain Google's
+// reCAPTCHA admin console doesn't recognize (a staging/preview domain, a
+// CI sandbox, a fresh custom domain not added yet), it can also just never
+// settle at all, with no error and no timeout of its own. Without a race
+// against a timeout here, that hangs the ENTIRE login/signup/forgot-
+// password submit forever — the exact opposite of this module's whole
+// fail-open purpose. loadRecaptcha() above already guards the script-load
+// phase (12s); this guards the execute() call itself the same way.
+const EXECUTE_TIMEOUT_MS = 8000;
+
 async function getToken(action) {
     const grecaptcha = await loadRecaptcha();
-    return grecaptcha.execute(RECAPTCHA_SITE_KEY, { action });
+    return Promise.race([
+        grecaptcha.execute(RECAPTCHA_SITE_KEY, { action }),
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('recaptcha_execute_timeout')), EXECUTE_TIMEOUT_MS),
+        ),
+    ]);
 }
 
 /**
