@@ -111,6 +111,9 @@ const SignupPage = () => {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [verified, setVerified] = useState(false);
+  // True only when this exact email already has a real, completed account —
+  // shows a direct login link instead of just an error string.
+  const [accountExists, setAccountExists] = useState(false);
 
   // If already signed in, go to the dashboard. Use isAuthed (not the raw
   // authStore.record) so a stale/expired token in localStorage — where
@@ -164,6 +167,7 @@ const SignupPage = () => {
       setOtpError('');
       setOtpInfo('');
       setVerified(false);
+      setAccountExists(false);
       setOtpOpen(true);
     } catch (err) {
       if (err?.code === 'ACCOUNT_EXISTS') {
@@ -204,6 +208,7 @@ const SignupPage = () => {
     setResending(true);
     setOtpError('');
     setOtpInfo('');
+    setAccountExists(false);
     try {
       await resendSignupOtp(form.email.trim());
       setCode('');
@@ -222,6 +227,7 @@ const SignupPage = () => {
     setCode('');
     setOtpError('');
     setOtpInfo('');
+    setAccountExists(false);
   };
 
   const completeSignup = async () => {
@@ -251,6 +257,7 @@ const SignupPage = () => {
     const entered = code.trim();
     setOtpError('');
     setOtpInfo('');
+    setAccountExists(false);
     if (entered.length !== OTP_LENGTH) {
       setOtpError(t('otp_enter_code'));
       return;
@@ -309,6 +316,13 @@ const SignupPage = () => {
       setVerifying(false);
       if (err?.code === 'OTP_INVALID') {
         setOtpError(t('otp_invalid'));
+        return;
+      }
+      // A real, already-completed account owns this email — never show the
+      // raw technical code; a clear message plus a direct way to log in.
+      if (err?.code === 'ACCOUNT_EXISTS') {
+        setAccountExists(true);
+        setOtpError(t('account_exists'));
         return;
       }
       const msg = String(err?.response?.message || err?.message || '');
@@ -583,6 +597,13 @@ const SignupPage = () => {
 
               {otpError && (
                 <p className="text-center text-sm text-destructive">{otpError}</p>
+              )}
+              {accountExists && (
+                <div className="text-center">
+                  <Link to="/login" className="text-sm font-semibold text-primary hover:underline">
+                    {t('login')}
+                  </Link>
+                </div>
               )}
               {otpInfo && !otpError && (
                 <p className="text-center text-sm text-emerald-600">{otpInfo}</p>

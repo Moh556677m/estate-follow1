@@ -116,14 +116,19 @@ router.post('/signup/verify', otpRateLimit, async (req, res) => {
 	// step needed. The frontend authenticates against this same record
 	// immediately afterward with the same password (see
 	// AuthContext.jsx's verifySignupOtp()); finalize-signup.pb.js then
-	// commits the real profile/subscription fields once that session exists.
+	// commits the real profile/subscription fields once that session exists
+	// and clears pending_signup — so pending_signup stays true here at
+	// creation, exactly matching what that hook expects to clear. Before
+	// this it was set false immediately at creation, which made a signup
+	// that died between here and finalize-signup indistinguishable from a
+	// genuinely completed account by that flag alone.
 	try {
 		const record = await pocketbaseClient.collection('users').create({
 			email,
 			password,
 			passwordConfirm: password,
 			role: 'owner',
-			pending_signup: false,
+			pending_signup: true,
 			nationality: PLACEHOLDER_NATIONALITY,
 			gender: PLACEHOLDER_GENDER,
 			verified: true,
@@ -132,7 +137,7 @@ router.post('/signup/verify', otpRateLimit, async (req, res) => {
 		return res.json({ ok: true, userId: record.id });
 	} catch (err) {
 		if (isNotUniqueEmailError(err)) {
-			return res.status(409).json({ message: 'ACCOUNT_EXISTS', code: 'ACCOUNT_EXISTS' });
+			return handleExistingAccount(email, password, res);
 		}
 		// Log everything PocketBase actually gave us — never just
 		// err.message — so a real cause (a rejected password, a schema
@@ -148,6 +153,69 @@ router.post('/signup/verify', otpRateLimit, async (req, res) => {
 		return res.status(502).json({ message: 'Could not create your account. Please try again in a moment.', code: 'ACCOUNT_CREATE_FAILED' });
 	}
 });
+
+// Duplicate-email path — a record with this email already exists. Two very
+// different real situations produce the exact same "unique" DB error, and
+// must NOT be treated the same:
+//
+//   1) A genuinely completed account (real profile, finished onboarding) —
+//      block. The user already has an account; tell them to log in instead.
+//
+//   2) An INCOMPLETE placeholder — either this exact signup flow died
+//      somewhere between account creation and finalize-signup on an earlier
+//      attempt (pending_signup still true), OR — the actual root cause hit
+//      in production — a leftover record from the old Supabase-bridge era
+//      (apps/api/src/routes/supabase-auth-bridge.js), which used to
+//      provision a PocketBase placeholder with a RANDOM password the user
+//      never saw, nationality:"PENDING", and pending_signup:false. Either
+//      way, the caller here just proved they own this mailbox RIGHT NOW via
+//      a fresh Resend OTP — so instead of permanently locking them out of
+//      an account with a password nobody knows, reset that record's
+//      password to the one they just typed and let signup continue on the
+//      SAME id. No duplicate account is ever created; nothing is deleted.
+//
+// A real, completed account never has nationality === "PENDING" (that
+// value is never reachable through the normal profile-completion flow —
+// NationalityField always writes a real ISO country code), so it's a safe,
+// specific signal for "this is a placeholder, not a real finished profile"
+// regardless of what pending_signup happens to say.
+async function handleExistingAccount(email, newPassword, res) {
+	let existing = null;
+	try {
+		existing = await pocketbaseClient.collection('users').getFirstListItem(`email = "${email.replace(/"/g, '\\"')}"`);
+	} catch (err) {
+		logger.error('signup/verify: could not look up the existing account', 'email', email, 'err', err?.message || err);
+		return res.status(502).json({ message: 'Could not create your account. Please try again in a moment.', code: 'ACCOUNT_CREATE_FAILED' });
+	}
+
+	const isIncompletePlaceholder =
+		!!existing && (existing.pending_signup === true || existing.nationality === PLACEHOLDER_NATIONALITY);
+
+	if (existing && isIncompletePlaceholder) {
+		try {
+			const resetRes = await fetch(`${PB_BASE}/ef/auth/otp-reset-password`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', Authorization: pocketbaseClient.authStore.token },
+				body: JSON.stringify({ email, newPassword }),
+			});
+			if (resetRes.ok) {
+				logger.info('signup/verify: recovered an incomplete placeholder account', 'email', email, 'userId', existing.id);
+				return res.json({ ok: true, userId: existing.id });
+			}
+			const body = await resetRes.text().catch(() => '');
+			logger.error('signup/verify: recovery password reset failed', 'email', email, 'status', resetRes.status, 'body', body);
+		} catch (err) {
+			logger.error('signup/verify: recovery threw', 'email', email, 'err', err?.message || err);
+		}
+		return res.status(502).json({ message: 'Could not create your account. Please try again in a moment.', code: 'ACCOUNT_CREATE_FAILED' });
+	}
+
+	// A genuinely completed account already owns this email — never a
+	// technical code to the end user; the frontend maps ACCOUNT_EXISTS to a
+	// clear Arabic message with a link to log in instead.
+	logger.info('signup/verify: email already has a completed account', 'email', email);
+	return res.status(409).json({ message: 'ACCOUNT_EXISTS', code: 'ACCOUNT_EXISTS' });
+}
 
 // --- Forgot / reset password --------------------------------------------
 //
