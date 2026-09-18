@@ -101,6 +101,12 @@ app.use(
           'https://onesignal.com',
           'https://www.clarity.ms',
           'https://scripts.clarity.ms',
+          // Clarity's "collect" telemetry beacon uses a DIFFERENT, single
+          // random-looking subdomain per session (e.g. https://f.clarity.ms,
+          // https://t.clarity.ms, ...) rather than one fixed hostname —
+          // confirmed live, a different one every single page load. Naming
+          // them individually is not possible; only a wildcard covers it.
+          'https://*.clarity.ms',
           'https://www.google.com', // reCAPTCHA v3's own token verification calls
         ],
         styleSrc: [

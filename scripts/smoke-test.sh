@@ -108,16 +108,17 @@ if [[ "$PB_PROC_COUNT" != "1" ]]; then
 fi
 echo "OK: exactly one PocketBase process is running."
 
-echo "== Verifying the Supabase auth bridge fails cleanly without valid config/token (never a raw 500) =="
-BRIDGE_STATUS=$(curl -sS -o /tmp/bridge.json -w '%{http_code}' \
-  -X POST "$BASE_URL/hcgi/api/auth/bridge" \
-  -H 'Authorization: Bearer not-a-real-token')
-if [[ "$BRIDGE_STATUS" != "503" && "$BRIDGE_STATUS" != "401" ]]; then
-  echo "FAIL: expected the Supabase auth bridge to reject with 503 (not configured) or 401 (bad token), got $BRIDGE_STATUS."
-  cat /tmp/bridge.json
+echo "== Verifying a regular-user OTP endpoint fails cleanly on bad input (never a raw 500) =="
+OTP_STATUS=$(curl -sS -o /tmp/otp.json -w '%{http_code}' \
+  -X POST "$BASE_URL/hcgi/api/user-otp/signup/verify" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"not-a-real-email","code":"000000","password":"short"}')
+if [[ "$OTP_STATUS" != "400" ]]; then
+  echo "FAIL: expected the OTP verify endpoint to reject malformed input with 400, got $OTP_STATUS."
+  cat /tmp/otp.json
   exit 1
 fi
-echo "OK: the Supabase auth bridge fails cleanly ($BRIDGE_STATUS)."
+echo "OK: the OTP endpoint fails cleanly on bad input ($OTP_STATUS)."
 
 echo "== Verifying SIGTERM shuts down gracefully with no orphaned PocketBase process =="
 kill -TERM "$SERVER_PID"
