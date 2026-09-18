@@ -235,8 +235,59 @@ app.use(
   }),
 );
 
-// Serve the built React / Vite website
-app.use(express.static(webDistPath));
+// Serve the built React / Vite website.
+//
+// Root cause of intermittent "blank white screen, nothing renders at all"
+// reports (worst on mobile): express.static() here had no cache-control
+// configuration of its own, so every file — INCLUDING index.html — only
+// ever got Express's bare defaults (ETag/Last-Modified only, no explicit
+// Cache-Control). index.html changes on every single deploy (it references
+// the CURRENT build's content-hashed JS/CSS filenames), but browsers are
+// free to serve a cached copy of it without revalidating first — some
+// mobile browsers do this aggressively, especially over a flaky mobile
+// connection. A visitor's phone would then load an OLD index.html
+// referencing a JS bundle filename that no longer exists after a newer
+// deploy replaced it (Vite content-hashes every filename in dist/assets/ —
+// nothing keeps the old ones around). That JS 404s before React ever gets
+// a chance to mount anything — not even this app's own ErrorBoundary,
+// which only ever catches errors AFTER React has already started running.
+// The result is a truly blank page with zero content and no visible error
+// at all, exactly matching the report.
+//
+// The fix: index.html must NEVER be served from cache without revalidating
+// (Cache-Control: no-cache — see sendIndexHtml() below, used everywhere
+// index.html is served) — while the content-hashed files under
+// dist/assets/ are the exact opposite case: their filename changes
+// whenever their content does, so caching them forever is always safe and
+// is what actually makes repeat visits fast. Everything else (favicon,
+// manifest, robots.txt, the OneSignal service worker — copied from
+// apps/web/public/ as-is, never content-hashed) keeps Express's own
+// default, unchanged.
+app.use(
+  express.static(webDistPath, {
+    // Without this, express.static()'s own built-in "serve index.html for a
+    // directory/root request" behavior answers every `/` request directly,
+    // completely bypassing sendIndexHtml() below (and its no-cache headers)
+    // for the single most common request of all — confirmed by a real
+    // request against this exact server: `/` came back
+    // "Cache-Control: public, max-age=0" (Express's bare default) instead
+    // of the no-cache this file needs. Turning this off forces EVERY
+    // index.html response, no matter which route serves it, through the
+    // one function that sets it correctly.
+    index: false,
+    setHeaders: (res, filePath) => {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
+  }),
+);
+
+function sendIndexHtml(res) {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  return res.sendFile(path.join(webDistPath, 'index.html'));
+}
 
 // Frontend SPA routes must be handled by React before API routes reach them.
 // This has to be an explicit prefix allow-list, not a blanket "anything that
@@ -273,7 +324,7 @@ function isFrontendRoute(reqPath) {
 
 app.use((req, res, next) => {
   if (req.method === 'GET' && isFrontendRoute(req.path)) {
-    return res.sendFile(path.join(webDistPath, 'index.html'));
+    return sendIndexHtml(res);
   }
   next();
 });
@@ -291,7 +342,7 @@ app.use('/hcgi/api', apiRouter);
 // return index.html so React Router can handle the page.
 app.use((req, res, next) => {
   if (req.method === 'GET' && req.accepts('html')) {
-    return res.sendFile(path.join(webDistPath, 'index.html'));
+    return sendIndexHtml(res);
   }
 
   next();
