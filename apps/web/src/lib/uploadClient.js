@@ -362,5 +362,12 @@ export function uploadErrorMessage(err, t) {
   }
   const topMessage = err?.data?.message;
   if (topMessage && typeof topMessage === 'string') return topMessage;
-  return t ? t('upload_error_generic') : 'Upload failed. Try again.';
+  // Genuinely nothing structured to show (a raw network-level rejection
+  // with no PocketBase JSON body at all — e.g. a hosting-platform reverse
+  // proxy rejecting the request before it ever reaches this app). The
+  // status code alone is still a real, useful diagnostic signal that was
+  // previously discarded entirely — appended so this is never a complete
+  // dead end to debug from.
+  const base = t ? t('upload_error_generic') : 'Upload failed. Try again.';
+  return err.status ? `${base} (${err.status})` : base;
 }
