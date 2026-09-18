@@ -131,7 +131,14 @@ if kill -0 "$SERVER_PID" 2>/dev/null; then
   exit 1
 fi
 sleep 1
-REMAINING_PB=$(pgrep -f "apps/pocketbase/pocketbase serve" | wc -l | tr -d ' ')
+# pgrep exits 1 (not an error — just "no match") when zero processes are
+# found, which is the GOOD outcome here. Under `set -o pipefail` that
+# would otherwise abort the whole script right on this line before the
+# actual check below ever runs, permanently short-circuiting this test to
+# a silent non-result instead of a real pass/fail every time shutdown is
+# genuinely clean.
+REMAINING_PB=$(pgrep -f "apps/pocketbase/pocketbase serve" | wc -l | tr -d ' ' || true)
+REMAINING_PB="${REMAINING_PB:-0}"
 if [[ "$REMAINING_PB" != "0" ]]; then
   echo "FAIL: $REMAINING_PB PocketBase process(es) survived server.cjs's SIGTERM shutdown."
   exit 1

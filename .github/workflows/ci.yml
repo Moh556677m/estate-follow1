@@ -154,6 +154,17 @@ jobs:
           export PB_SUPERUSER_EMAIL="ci-admin@example.com"
           export PB_SUPERUSER_PASSWORD="$(python3 -c 'import secrets;print(secrets.token_hex(12))')!"
           export PORT=4173
+          # `export` only affects THIS step's own shell process — a later
+          # step (Responsive smoke check, below) runs in a brand new shell
+          # and never inherits it, which meant that check's own
+          # PB_SUPERUSER_EMAIL/PASSWORD were always empty and it could never
+          # actually log in to seed/drive the admin sidebar checks. Writing
+          # to $GITHUB_ENV is what actually persists a var to every
+          # subsequent step in this job.
+          {
+            echo "PB_SUPERUSER_EMAIL=$PB_SUPERUSER_EMAIL"
+            echo "PB_SUPERUSER_PASSWORD=$PB_SUPERUSER_PASSWORD"
+          } >> "$GITHUB_ENV"
           nohup node server.cjs > server.log 2>&1 &
           for i in $(seq 1 40); do
             code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/hcgi/platform/api/health || echo 000)

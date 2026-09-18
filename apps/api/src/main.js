@@ -61,7 +61,28 @@ process.on('unhandledRejection', (reason, promise) => {
 // is now the single, sole authority for shutdown: it stops this HTTP server
 // (see the exported `server` below) and only then decides whether to stop
 // PocketBase, in one coordinated sequence.
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        // apps/web/index.html ships a handful of small inline <script>
+        // blocks (a mobile pinch-zoom lock, plus a few Vite build-injected
+        // module-preload helpers) — this file is served as a static asset
+        // via express.static(), never rendered per-request, so there is no
+        // practical way to attach a per-request CSP nonce to them. Helmet's
+        // default script-src 'self' (no exception configured before this)
+        // silently blocked every one of these on every single page load —
+        // confirmed via the CI responsive-smoke check once it actually ran
+        // far enough to see it — including the zoom-lock script actually
+        // never running in production, with nothing surfacing the failure
+        // anywhere except the browser console. Scoped to script-src only;
+        // every other Helmet CSP default (object-src, frame-ancestors,
+        // etc.) is untouched.
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
+  }),
+);
 
 app.use(
   cors({
