@@ -63,8 +63,11 @@ const AdminLoginPage = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    // TEMP DEBUG (remove): pinpointing a CI-only hang before /admin/overview.
+    console.error('[EFDEBUG] handleSubmit start', Date.now());
     // reCAPTCHA v3 — verify the user is human before attempting a staff sign-in.
     const captcha = await verifyRecaptcha('login');
+    console.error('[EFDEBUG] recaptcha resolved', Date.now(), JSON.stringify(captcha));
     if (!captcha.ok) {
       setLoading(false);
       setError(
@@ -78,7 +81,9 @@ const AdminLoginPage = () => {
       // server-side if the account turns out to be a regular owner — not
       // just via the isStaff() check below, which only runs after a
       // successful PocketBase auth.
+      console.error('[EFDEBUG] calling login()', Date.now());
       await login(email, password, { portal: 'admin' });
+      console.error('[EFDEBUG] login() returned', Date.now());
       const rec = pb.authStore.record;
       if (!isStaff(rec)) {
         // A regular owner/broker/company tried to use the admin portal.
@@ -87,8 +92,10 @@ const AdminLoginPage = () => {
         setLoading(false);
         return;
       }
+      console.error('[EFDEBUG] navigating', Date.now());
       navigate('/admin/overview', { replace: true });
     } catch (err) {
+      console.error('[EFDEBUG] caught error', Date.now(), err?.code, err?.message);
       const code = err?.code || '';
       if (code === 'ACCOUNT_SUSPENDED') setError(t('err_account_suspended'));
       else if (code === 'ACCOUNT_INACTIVE') setError(t('err_account_inactive'));
