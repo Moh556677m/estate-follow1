@@ -177,3 +177,12 @@ jobs:
         env:
           BASE_URL: http://127.0.0.1:4173
         run: node scripts/responsive-smoke.mjs
+
+      # This is the only place the real PocketBase/API request log for the
+      # smoke check above is visible — the "Start server" step's own `cat`
+      # only prints its OWN health-check traffic, from before the actual
+      # smoke-check step (which runs afterward, in a separate step) ever
+      # sent it any requests.
+      - name: Show server log
+        if: always()
+        run: cat server.log || true
