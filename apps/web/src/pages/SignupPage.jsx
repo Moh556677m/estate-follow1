@@ -33,7 +33,6 @@ import { LanguageSwitcher } from '@/components/AppLayout';
 import pb from '@/lib/pocketbaseClient';
 import { registerSession } from '@/lib/sessions';
 import { finalizeSignup } from '@/lib/authApi';
-import { mirrorProfileToSupabase } from '@/lib/supabaseClient';
 import { trackReferralClick } from '@/lib/referralClient';
 import { verifyRecaptcha } from '@/lib/recaptcha';
 import { detectCountry } from '@/hooks/useGeoIp';
@@ -156,9 +155,9 @@ const SignupPage = () => {
     setSending(true);
     setError('');
     try {
-      // Regular-user signup now goes straight to Supabase Auth — PocketBase
-      // is only involved afterwards, via the bridge in verifyOtp() below,
-      // once the email is actually confirmed.
+      // Sends the Resend OTP for this email — the real PocketBase account
+      // itself isn't created until the code is verified (see verifyOtp()
+      // below).
       await signup(form.email.trim(), form.password);
       setCode('');
       setSecondsLeft(OTP_DURATION);
@@ -263,16 +262,16 @@ const SignupPage = () => {
     setVerifying(true);
     try {
       // 1) Verify the Resend-delivered signup code — this both proves the
-      //    email and creates+signs-in the real Supabase user, which
-      //    verifySignupOtp() bridges into a real PocketBase session
-      //    (pb.authStore) in one step.
+      //    email and creates the real PocketBase user record directly with
+      //    the real password, then authenticates as it (pb.authStore) in
+      //    one step. See AuthContext.jsx's verifySignupOtp().
       await verifySignupOtp(form.email.trim(), entered, form.password);
 
       // 2) Commit the profile fields the signup form collected (name,
       //    nationality, gender, phone, referral) onto that same PocketBase
-      //    record. No password here — Supabase owns the real password now;
-      //    finalize-signup.pb.js treats password as optional for exactly
-      //    this case (see its own comment).
+      //    record. No password here — it's already set; finalize-signup.pb.js
+      //    treats password as optional for exactly this case (see its own
+      //    comment).
       await finalizeSignup({
         name: form.name.trim(),
         nationality: form.nationality,
@@ -281,8 +280,30 @@ const SignupPage = () => {
         account_type: form.account_type || 'owner',
         referred_by: referredBy || '',
       });
+
+      // finalize-signup.pb.js commits the real profile + subscription/trial
+      // fields (nationality, gender, phone, account_type, profile_complete,
+      // subscription_package, trial_start/trial_end, account_state, ...)
+      // server-side, but only ever returns { ok, id } — it never sends the
+      // updated record back. Without this refresh, pb.authStore.record (and
+      // therefore useAuth().user everywhere, including the dashboard this
+      // page is about to navigate to) stays on the bare placeholder record
+      // created a moment earlier — missing every one of those fields
+      // entirely. Any code on the very next screen that expects them to
+      // exist would be reading an incomplete record purely due to this
+      // timing gap, not an actual data problem. authRefresh() pulls the
+      // just-committed record and (via pb.authStore.onChange in
+      // AuthContext.jsx) updates useAuth().user too, so nothing downstream
+      // ever sees the stale placeholder.
+      try {
+        await pb.collection('users').authRefresh();
+      } catch {
+        /* best-effort — the account is already fully created either way;
+           the next natural refresh (heartbeat / realtime sync) still
+           catches this up if this one call happens to fail. */
+      }
+
       try { localStorage.removeItem('ef_ref'); } catch { /* ignore */ }
-      mirrorProfileToSupabase(pb.authStore.record);
       await completeSignup();
     } catch (err) {
       setVerifying(false);

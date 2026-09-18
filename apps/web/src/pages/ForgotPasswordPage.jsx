@@ -67,10 +67,10 @@ const ForgotPasswordPage = () => {
     setSending(true);
     setEmailError('');
     try {
-      // Supabase's resetPasswordForEmail() deliberately never reveals
-      // whether the address is actually registered (avoids account
-      // enumeration) — it always "succeeds" from the caller's point of
-      // view, so there is no more "no account found" branch to handle here.
+      // /user-otp/reset/start deliberately never reveals whether the
+      // address is actually registered (avoids account enumeration) — it
+      // always "succeeds" from the caller's point of view, so there is no
+      // "no account found" branch to handle here.
       await requestPasswordReset(email.trim());
       setCode(['', '', '', '', '', '']);
       setSecondsLeft(OTP_DURATION);

@@ -1,18 +1,42 @@
 // Regular-user Signup / Forgot-Password OTP — Resend sends the email,
-// Supabase Auth owns the resulting identity/session, PocketBase is only a
-// private backing store for the OTP challenge itself (see utils/userOtp.js
-// for the full explanation of why this exists instead of either Supabase's
-// built-in email/OTP or PocketBase's own users-collection request-otp).
+// PocketBase's own "users" collection owns the resulting identity/session
+// directly (superuser-created/updated from here, no oldPassword needed —
+// see otp-password-reset.pb.js for the reset case), PocketBase is also the
+// backing store for the OTP challenge itself (see utils/userOtp.js for the
+// full explanation of why this exists instead of PocketBase's own
+// users-collection request-otp). Regular users no longer touch Supabase at
+// all — this was previously bridged through Supabase Auth; that indirection
+// is gone, so there is one fewer external dependency and one fewer place a
+// misconfigured/missing third-party credential can break signup or login.
 //
 // Deliberately public (no PocketBase auth middleware) — these are the
 // pre-authentication steps of signing up / resetting a forgotten password.
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { supabaseAdmin, isSupabaseConfigured } from '../utils/supabaseClient.js';
+import pocketbaseClient from '../utils/pocketbaseClient.js';
 import { sendOtp, verifyOtp, issueResetTicket, consumeResetTicket } from '../utils/userOtp.js';
 import logger from '../utils/logger.js';
 
 const router = Router();
+
+// A brand-new account has no name/phone/nationality/gender yet — those are
+// collected on the signup form and committed afterward via
+// finalize-signup.pb.js (SignupPage.jsx calls it right after verifySignupOtp
+// succeeds), exactly like the existing Supabase-bridge placeholder pattern
+// this replaces (see the same two constants in
+// supabase-auth-bridge.js — kept identical here for consistency, though
+// that route no longer handles regular users).
+const PLACEHOLDER_NATIONALITY = 'PENDING';
+const PLACEHOLDER_GENDER = 'male';
+
+const PB_BASE = process.env.POCKETBASE_URL || 'http://localhost:8090';
+
+function isNotUniqueEmailError(err) {
+	const fieldCode = err?.response?.data?.email?.code || err?.data?.data?.email?.code;
+	if (fieldCode === 'validation_not_unique') return true;
+	const msg = String(err?.message || '').toLowerCase();
+	return err?.status === 400 && msg.includes('email') && (msg.includes('unique') || msg.includes('taken'));
+}
 
 // Stricter than the app-wide globalRateLimit (100/5min) — an OTP endpoint
 // is exactly the kind of thing brute-forcing/hammering targets first.
@@ -79,9 +103,6 @@ router.post('/signup/verify', otpRateLimit, async (req, res) => {
 	if (!email || !code || !password) {
 		return res.status(400).json({ message: 'Email, code and password are required.' });
 	}
-	if (!isSupabaseConfigured) {
-		return res.status(503).json({ message: 'Supabase is not configured on this server.' });
-	}
 
 	try {
 		await verifyOtp(email, 'signup', code);
@@ -89,34 +110,42 @@ router.post('/signup/verify', otpRateLimit, async (req, res) => {
 		return res.status(otpVerifyStatus(err?.code)).json({ message: err?.message || 'Invalid code.', code: err?.code });
 	}
 
-	// Admin API createUser() never sends any email regardless of
-	// email_confirm — Resend already proved this mailbox above, so we mark
-	// it confirmed immediately instead of triggering a second (Supabase)
-	// confirmation email.
+	// Creates the real PocketBase "users" record directly, with the real
+	// password the user typed — Resend already proved this mailbox above
+	// (verifyOtp succeeded), so there is no separate "confirm your email"
+	// step needed. The frontend authenticates against this same record
+	// immediately afterward with the same password (see
+	// AuthContext.jsx's verifySignupOtp()); finalize-signup.pb.js then
+	// commits the real profile/subscription fields once that session exists.
 	try {
-		const { data, error } = await supabaseAdmin.auth.admin.createUser({
+		const record = await pocketbaseClient.collection('users').create({
 			email,
 			password,
-			email_confirm: true,
+			passwordConfirm: password,
+			role: 'owner',
+			pending_signup: false,
+			nationality: PLACEHOLDER_NATIONALITY,
+			gender: PLACEHOLDER_GENDER,
+			verified: true,
+			name: '',
 		});
-		if (error) {
-			const msg = String(error.message || '').toLowerCase();
-			const alreadyExists =
-				error.code === 'email_exists' ||
-				error.code === 'user_already_exists' ||
-				msg.includes('already been registered') ||
-				msg.includes('already registered') ||
-				msg.includes('already exists');
-			if (alreadyExists) {
-				return res.status(409).json({ message: 'ACCOUNT_EXISTS', code: 'ACCOUNT_EXISTS' });
-			}
-			logger.error('signup/verify: admin.createUser failed', 'email', email, 'err', error.message);
-			return res.status(500).json({ message: 'Could not create your account.' });
-		}
-		return res.json({ ok: true, userId: data.user.id });
+		return res.json({ ok: true, userId: record.id });
 	} catch (err) {
-		logger.error('signup/verify threw', 'email', email, 'err', err?.message || err);
-		return res.status(500).json({ message: 'Could not create your account.' });
+		if (isNotUniqueEmailError(err)) {
+			return res.status(409).json({ message: 'ACCOUNT_EXISTS', code: 'ACCOUNT_EXISTS' });
+		}
+		// Log everything PocketBase actually gave us — never just
+		// err.message — so a real cause (a rejected password, a schema
+		// change, a PocketBase connectivity issue) is diagnosable from the
+		// logs instead of producing one opaque message with nothing to go
+		// on. Email only, never the password.
+		logger.error(
+			'signup/verify: pocketbase user create failed',
+			'email', email,
+			'status', err?.status,
+			'response', JSON.stringify(err?.response || err?.message || err),
+		);
+		return res.status(502).json({ message: 'Could not create your account. Please try again in a moment.', code: 'ACCOUNT_CREATE_FAILED' });
 	}
 });
 
@@ -124,28 +153,25 @@ router.post('/signup/verify', otpRateLimit, async (req, res) => {
 //
 // Anti-enumeration: both /reset/start and /reset/resend always respond
 // { ok: true } whether or not the email belongs to a real account — the
-// existence check (via generateLink, which never sends anything itself)
-// only decides whether Resend is actually asked to send a code, never
-// what the HTTP response says.
+// existence check (a plain PocketBase lookup, which never sends anything
+// itself) only decides whether Resend is actually asked to send a code,
+// never what the HTTP response says.
 
-async function findSupabaseUserIdByEmail(email) {
-	const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-		type: 'recovery',
-		email,
-	});
-	if (error || !data?.user?.id) return null;
-	return data.user.id;
+async function findUserByEmail(email) {
+	try {
+		return await pocketbaseClient.collection('users').getFirstListItem(`email = "${email.replace(/"/g, '\\"')}"`);
+	} catch (err) {
+		if (err?.status === 404) return null;
+		throw err;
+	}
 }
 
 router.post('/reset/start', otpRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	if (!email) return res.status(400).json({ message: 'Email is required.' });
-	if (!isSupabaseConfigured) {
-		return res.status(503).json({ message: 'Supabase is not configured on this server.' });
-	}
 	try {
-		const userId = await findSupabaseUserIdByEmail(email);
-		if (userId) {
+		const user = await findUserByEmail(email);
+		if (user) {
 			await sendOtp(email, 'reset');
 		}
 	} catch (err) {
@@ -163,12 +189,9 @@ router.post('/reset/start', otpRateLimit, async (req, res) => {
 router.post('/reset/resend', otpRateLimit, async (req, res) => {
 	const email = normalizeEmail(req.body?.email);
 	if (!email) return res.status(400).json({ message: 'Email is required.' });
-	if (!isSupabaseConfigured) {
-		return res.status(503).json({ message: 'Supabase is not configured on this server.' });
-	}
 	try {
-		const userId = await findSupabaseUserIdByEmail(email);
-		if (userId) {
+		const user = await findUserByEmail(email);
+		if (user) {
 			await sendOtp(email, 'reset');
 		}
 	} catch (err) {
@@ -207,9 +230,6 @@ router.post('/reset/complete', otpRateLimit, async (req, res) => {
 	if (!email || !resetTicket || !newPassword) {
 		return res.status(400).json({ message: 'Email, reset ticket and new password are required.' });
 	}
-	if (!isSupabaseConfigured) {
-		return res.status(503).json({ message: 'Supabase is not configured on this server.' });
-	}
 
 	try {
 		await consumeResetTicket(email, resetTicket);
@@ -217,14 +237,33 @@ router.post('/reset/complete', otpRateLimit, async (req, res) => {
 		return res.status(otpVerifyStatus(err?.code)).json({ message: err?.message || 'Invalid session.', code: err?.code });
 	}
 
+	// Sets the new password via a dedicated PocketBase JSVM route
+	// (otp-password-reset.pb.js) — PocketBase's REST API refuses to update
+	// an auth record's password without oldPassword regardless of caller
+	// identity, and this caller (this request has no logged-in user at all
+	// yet — that's the whole point of "forgot" password) has no oldPassword
+	// to supply. That route runs as a real record.setPassword() inside
+	// PocketBase itself, gated to accept only our own superuser-authenticated
+	// service token (pocketbaseClient.authStore.token below), and separately
+	// refuses to touch a staff/admin account.
 	try {
-		const userId = await findSupabaseUserIdByEmail(email);
-		if (!userId) {
-			return res.status(404).json({ message: 'No account found with this email.' });
-		}
-		const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password: newPassword });
-		if (error) {
-			logger.error('reset/complete: updateUserById failed', 'email', email, 'err', error.message);
+		const res2 = await fetch(`${PB_BASE}/ef/auth/otp-reset-password`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: pocketbaseClient.authStore.token,
+			},
+			body: JSON.stringify({ email, newPassword }),
+		});
+		const body = await res2.json().catch(() => ({}));
+		if (!res2.ok) {
+			if (res2.status === 404) {
+				return res.status(404).json({ message: 'No account found with this email.' });
+			}
+			if (res2.status === 403) {
+				return res.status(404).json({ message: 'No account found with this email.' });
+			}
+			logger.error('reset/complete: otp-reset-password failed', 'email', email, 'status', res2.status, 'body', JSON.stringify(body));
 			return res.status(500).json({ message: 'Could not reset your password.' });
 		}
 		return res.json({ ok: true });

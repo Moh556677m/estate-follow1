@@ -1,19 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Regression tests for the auth stack. This session's incidents were caused
-// by two failure modes, both of which have already broken production once:
+// by failure modes that have already broken production before:
 //   1) An error-classification bug that showed the wrong message (e.g. a
 //      real signup/finalize-signup validation error reported as "invalid
 //      OTP code", or a rate-limit/network blip reported as "session
 //      expired") — see classifyAuthError/classifySupabaseError below.
 //   2) Admin auth accidentally sharing code with regular-user auth when the
 //      two were meant to be completely independent (portal-login
-//      separation, then again with the Supabase migration for regular
-//      users only) — see the "portal separation" describe block below.
+//      separation) — see the "portal separation" describe block below.
+//   3) Regular-user auth was migrated to Supabase and then back to
+//      PocketBase-native within the same project's lifetime — the tests
+//      below assert the CURRENT (PocketBase-native, no Supabase) shape;
+//      Supabase's own auth primitives (signUp/signIn/verifyOtp/
+//      resetPasswordForEmail/updateUser) must never be called anywhere in
+//      the regular-user signup/login/OTP/reset flow again.
 // These are fast, dependency-free checks that run on every push (apps/web's
 // `npm test`, wired into .github/workflows/ci.yml's `build` job) — they
-// exist specifically so a future edit that reintroduces either failure mode
-// fails CI immediately instead of reaching production.
+// exist specifically so a future edit that reintroduces any of these
+// failure modes fails CI immediately instead of reaching production.
 
 vi.mock('@/lib/pocketbaseClient', () => {
   const authStore = {
@@ -149,7 +154,11 @@ describe('login() portal separation (regression guard)', () => {
     pb.authStore.clear();
   });
 
-  it('portal="admin" only ever calls PocketBase, never Supabase', async () => {
+  // Regular-user auth was migrated to Supabase and back to PocketBase-native
+  // within this project's lifetime — both portals now authenticate directly
+  // against PocketBase, exactly like admin always did. Supabase's own auth
+  // primitives must never be touched by either branch.
+  it('portal="admin" calls PocketBase with X-Portal: admin, never Supabase', async () => {
     pb.collection().authWithPassword.mockResolvedValueOnce({
       record: { id: 'admin1', role: 'admin', is_super_admin: false, email: 'a@b.com' },
     });
@@ -165,21 +174,18 @@ describe('login() portal separation (regression guard)', () => {
       await result.current.login('a@b.com', 'password123', { portal: 'admin' });
     });
 
-    expect(pb.collection().authWithPassword).toHaveBeenCalled();
+    expect(pb.collection().authWithPassword).toHaveBeenCalledWith(
+      'a@b.com',
+      'password123',
+      expect.objectContaining({ headers: { 'X-Portal': 'admin' } }),
+    );
     expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
+    expect(apiServerClient.fetch).not.toHaveBeenCalled();
   });
 
-  it('portal="user" (default) only ever calls Supabase, then bridges — never PocketBase authWithPassword directly', async () => {
-    supabase.auth.signInWithPassword.mockResolvedValueOnce({
-      data: { session: { access_token: 'fake-supabase-token' } },
-      error: null,
-    });
-    apiServerClient.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        token: 'fake-pb-token',
-        record: { id: 'owner1', role: 'owner', is_super_admin: false, email: 'o@b.com' },
-      }),
+  it('portal="user" (default) calls PocketBase with X-Portal: user, never Supabase, never the old bridge', async () => {
+    pb.collection().authWithPassword.mockResolvedValueOnce({
+      record: { id: 'owner1', role: 'owner', is_super_admin: false, email: 'o@b.com' },
     });
     const { AuthProvider, useAuth } = await import('@/contexts/AuthContext');
     const React = await import('react');
@@ -193,14 +199,15 @@ describe('login() portal separation (regression guard)', () => {
       await result.current.login('o@b.com', 'password123');
     });
 
-    expect(supabase.auth.signInWithPassword).toHaveBeenCalledWith({
-      email: 'o@b.com',
-      password: 'password123',
-    });
-    expect(pb.collection().authWithPassword).not.toHaveBeenCalled();
-    expect(apiServerClient.fetch).toHaveBeenCalledWith(
+    expect(pb.collection().authWithPassword).toHaveBeenCalledWith(
+      'o@b.com',
+      'password123',
+      expect.objectContaining({ headers: { 'X-Portal': 'user' } }),
+    );
+    expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
+    expect(apiServerClient.fetch).not.toHaveBeenCalledWith(
       '/auth/bridge',
-      expect.objectContaining({ method: 'POST' }),
+      expect.anything(),
     );
   });
 });
@@ -242,16 +249,10 @@ describe('Signup/Forgot-Password OTP is Resend-only (regression guard)', () => {
     expect(supabase.auth.signUp).not.toHaveBeenCalled();
   });
 
-  it('verifySignupOtp() verifies via our backend, then signs in + bridges — never supabase.auth.verifyOtp', async () => {
-    apiServerClient.fetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, userId: 'u1' }) }) // /signup/verify
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ token: 'pb-token', record: { id: 'owner1', role: 'owner', email: 'new@user.com' } }),
-      }); // /auth/bridge
-    supabase.auth.signInWithPassword.mockResolvedValueOnce({
-      data: { session: { access_token: 'sb-token' } },
-      error: null,
+  it('verifySignupOtp() verifies via our backend, then authenticates directly against PocketBase — never touches Supabase', async () => {
+    apiServerClient.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, userId: 'u1' }) }); // /signup/verify
+    pb.collection().authWithPassword.mockResolvedValueOnce({
+      record: { id: 'owner1', role: 'owner', email: 'new@user.com' },
     });
     const { result, act } = await setup();
 
@@ -263,10 +264,9 @@ describe('Signup/Forgot-Password OTP is Resend-only (regression guard)', () => {
       '/user-otp/signup/verify',
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(supabase.auth.signInWithPassword).toHaveBeenCalledWith({
-      email: 'new@user.com',
-      password: 'password123!',
-    });
+    expect(pb.collection().authWithPassword).toHaveBeenCalledWith('new@user.com', 'password123!');
+    expect(apiServerClient.fetch).not.toHaveBeenCalledWith('/auth/bridge', expect.anything());
+    expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
     expect(supabase.auth.verifyOtp).not.toHaveBeenCalled();
     expect(supabase.auth.signUp).not.toHaveBeenCalled();
   });

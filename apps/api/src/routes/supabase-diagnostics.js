@@ -16,7 +16,7 @@
 import { Router } from 'express';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import pocketbaseClient from '../utils/pocketbaseClient.js';
-import { supabaseAdmin, isSupabaseConfigured } from '../utils/supabaseClient.js';
+import { supabaseAdmin, isSupabaseConfigured, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../utils/supabaseClient.js';
 
 const router = Router();
 
@@ -82,8 +82,14 @@ router.get('/', async (req, res) => {
 		return res.json(result);
 	}
 
-	const baseUrl = String(process.env.SUPABASE_URL).replace(/\/+$/, '');
-	const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY || '';
+	// Use the already-cleaned/origin-only values (see utils/supabaseClient.js)
+	// rather than re-reading process.env raw here — a diagnostics endpoint
+	// testing a DIFFERENT, unsanitized copy of the same two vars than the one
+	// supabaseAdmin actually uses could report PASS/FAIL that doesn't match
+	// reality (e.g. failing here on an invisible character that supabaseAdmin
+	// itself already strips, or vice versa).
+	const baseUrl = SUPABASE_URL;
+	const publishableKey = SUPABASE_PUBLISHABLE_KEY;
 
 	// 1) Auth connection — hits the public auth settings endpoint with the
 	//    publishable key. Requires no user to exist; just proves the URL +

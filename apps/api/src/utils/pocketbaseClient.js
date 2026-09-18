@@ -75,16 +75,25 @@ pocketbaseClient.beforeSend = async function (url, options) {
                 authPromise = null;
             });
         }
-        
+
         if (authPromise) {
             await authPromise;
         }
-        
+
         logger.info('PocketBase client initialized successfully');
     } catch (err) {
-        logger.error('Failed to initialize PocketBase client:', err);
-
-        process.exit(1);
+        // Deliberately NOT calling process.exit() here — this runs
+        // asynchronously, well after server.cjs has already started the API
+        // listening (see server.cjs's own Step 3 comment for the identical
+        // reasoning). A transient PocketBase startup delay or a momentary
+        // auth blip would otherwise kill the entire process — API, static
+        // site and the PocketBase reverse proxy together — for a condition
+        // that resolves itself on the very next request anyway: every call
+        // already goes through beforeSend() above, which re-authenticates
+        // on demand whenever authStore.isValid is false. Logging here is
+        // purely diagnostic; it never turns a fixable hiccup into a full
+        // outage.
+        logger.error('PocketBase client failed to authenticate at startup (will retry lazily on the next request):', err);
     }
 })();
 
