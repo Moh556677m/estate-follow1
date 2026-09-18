@@ -69,16 +69,51 @@ app.use(
         // blocks (a mobile pinch-zoom lock, plus a few Vite build-injected
         // module-preload helpers) — this file is served as a static asset
         // via express.static(), never rendered per-request, so there is no
-        // practical way to attach a per-request CSP nonce to them. Helmet's
-        // default script-src 'self' (no exception configured before this)
-        // silently blocked every one of these on every single page load —
-        // confirmed via the CI responsive-smoke check once it actually ran
-        // far enough to see it — including the zoom-lock script actually
-        // never running in production, with nothing surfacing the failure
-        // anywhere except the browser console. Scoped to script-src only;
-        // every other Helmet CSP default (object-src, frame-ancestors,
-        // etc.) is untouched.
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        // practical way to attach a per-request CSP nonce to them.
+        //
+        // Every domain below is a real, existing integration this app
+        // already loads client-side — Helmet's un-configured defaults
+        // (script-src/connect-src/style-src/font-src all effectively
+        // 'self' only) were silently blocking ALL of them on every single
+        // page load, confirmed one by one via the CI responsive-smoke
+        // check's real Chromium console-error capture once that check
+        // could finally run far enough to see it. None of these were a
+        // deliberate security decision to exclude — this CSP was never
+        // actually configured for what the app uses, just left at
+        // Helmet's generic default.
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'", // apps/web/index.html's own small inline scripts (see above)
+          'https://www.googletagmanager.com', // Google Analytics (gtag.js)
+          'https://www.clarity.ms', // Microsoft Clarity
+          'https://cdn.onesignal.com', // OneSignal push-notification SDK
+          'https://www.google.com', // reCAPTCHA v3 (login/signup/forgot-password)
+        ],
+        connectSrc: [
+          "'self'",
+          'https://ipwho.is', // best-effort GeoIP default for the phone/nationality fields
+          'https://www.google-analytics.com',
+          'https://www.googletagmanager.com',
+          'https://cdn.onesignal.com',
+          'https://onesignal.com',
+          'https://www.clarity.ms',
+          'https://www.google.com', // reCAPTCHA v3's own token verification calls
+          'https://*.supabase.co', // kept for a Supabase-bridged legacy session, if any (see AuthContext.jsx)
+          'wss://*.supabase.co',
+        ],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'", // component libraries that set inline style attributes
+          'https://fonts.googleapis.com', // dynamic per-platform font stylesheet (App.jsx)
+        ],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        imgSrc: ["'self'", 'data:', 'https:'], // property/document images (e.g. Cloudinary) and social previews
+        frameSrc: [
+          'https://www.youtube.com',
+          'https://youtube.com',
+          'https://player.vimeo.com',
+          'https://www.google.com', // reCAPTCHA badge/challenge iframe
+        ],
       },
     },
   }),
