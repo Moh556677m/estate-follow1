@@ -82,9 +82,21 @@ const AdminLoginPage = () => {
       // just via the isStaff() check below, which only runs after a
       // successful PocketBase auth.
       console.error('[EFDEBUG] calling login()', Date.now());
-      await login(email, password, { portal: 'admin' });
+      const loginResult = await login(email, password, { portal: 'admin' });
       console.error('[EFDEBUG] login() returned', Date.now());
       const rec = pb.authStore.record;
+      console.error(
+        '[EFDEBUG] rec check',
+        JSON.stringify({
+          rec_id: rec?.id,
+          rec_role: rec?.role,
+          rec_is_super_admin: rec?.is_super_admin,
+          rec_keys: rec ? Object.keys(rec) : null,
+          loginResult_record_role: loginResult?.record?.role,
+          loginResult_record_is_super_admin: loginResult?.record?.is_super_admin,
+          authStoreIsValid: pb.authStore.isValid,
+        }),
+      );
       if (!isStaff(rec)) {
         // A regular owner/broker/company tried to use the admin portal.
         await logout();
