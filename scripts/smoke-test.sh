@@ -120,6 +120,44 @@ if [[ "$OTP_STATUS" != "400" ]]; then
 fi
 echo "OK: the OTP endpoint fails cleanly on bad input ($OTP_STATUS)."
 
+echo "== Verifying a freshly-created signup placeholder (pending_signup=true) can immediately log in =="
+# Regression guard for a real production deadlock: routes/user-otp.js's
+# /signup/verify creates the user record with pending_signup=true by design
+# (see its own comment), then AuthContext.jsx's verifySignupOtp()
+# immediately authenticates as that same record so it can call
+# finalize-signup.pb.js — the ONLY thing that ever clears pending_signup.
+# A PocketBase auth hook that rejects auth-with-password purely because
+# pending_signup is still true makes that impossible: the account can
+# never reach finalize-signup, so it can never stop being "pending", so it
+# can never log in again either — a permanent deadlock on every single
+# signup. This exact bug shipped once already (platform.pb.js's account
+# hook used to throw ACCOUNT_PENDING here) and is invisible to the unit
+# tests (they mock PocketBase entirely), so it is asserted here against a
+# real PocketBase instance instead.
+SUPERUSER_TOKEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/superuser-auth.json','utf8')).token)")
+PENDING_EMAIL="smoke-pending-$(date +%s)@example.com"
+PENDING_PASSWORD="Sm0ke-Pending-Password!"
+CREATE_STATUS=$(curl -sS -o /tmp/pending-create.json -w '%{http_code}' \
+  -X POST "$BASE_URL/hcgi/platform/api/collections/users/records" \
+  -H "Authorization: $SUPERUSER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$PENDING_EMAIL\",\"password\":\"$PENDING_PASSWORD\",\"passwordConfirm\":\"$PENDING_PASSWORD\",\"role\":\"owner\",\"pending_signup\":true,\"nationality\":\"PENDING\",\"gender\":\"male\",\"verified\":true,\"name\":\"\"}")
+if [[ "$CREATE_STATUS" != "200" ]]; then
+  echo "FAIL: could not create the pending-signup placeholder record (status $CREATE_STATUS)."
+  cat /tmp/pending-create.json
+  exit 1
+fi
+PENDING_LOGIN_STATUS=$(curl -sS -o /tmp/pending-login.json -w '%{http_code}' \
+  -X POST "$BASE_URL/hcgi/platform/api/collections/users/auth-with-password" \
+  -H 'Content-Type: application/json' \
+  -d "{\"identity\":\"$PENDING_EMAIL\",\"password\":\"$PENDING_PASSWORD\"}")
+if [[ "$PENDING_LOGIN_STATUS" != "200" ]]; then
+  echo "FAIL: a freshly-created pending_signup=true account could not authenticate (status $PENDING_LOGIN_STATUS) — this is the signup deadlock bug."
+  cat /tmp/pending-login.json
+  exit 1
+fi
+echo "OK: a freshly-created signup placeholder can authenticate immediately (no deadlock)."
+
 echo "== Verifying SIGTERM shuts down gracefully with no orphaned PocketBase process =="
 kill -TERM "$SERVER_PID"
 for i in $(seq 1 10); do

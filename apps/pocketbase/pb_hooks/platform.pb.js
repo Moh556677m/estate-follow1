@@ -413,10 +413,25 @@ onRecordAuthWithPasswordRequest((e) => {
       isSuper = true;
     }
 
+    // pending_signup is deliberately NOT enforced here. Rejecting
+    // auth-with-password for a still-pending record would make it
+    // impossible for a brand-new signup to ever finish: the OTP-verify step
+    // creates the user with pending_signup=true, then immediately
+    // authenticates as it (see AuthContext.jsx's verifySignupOtp()) purely
+    // to obtain the session finalize-signup.pb.js requires
+    // ($apis.requireAuth('users')) to clear that flag and commit the real
+    // profile — the one and only thing that can ever turn pending_signup
+    // false. Blocking that first auth here created an unrecoverable
+    // deadlock: every fresh signup failed immediately after the OTP step
+    // (surfacing to the user as a wrong-password-looking error), and the
+    // account could never reach finalize-signup to fix itself. A pending
+    // account reaching the regular /login page instead of finishing signup
+    // is still fully blocked — see assertAccountAllowed() in
+    // AuthContext.jsx, which rejects and clears the session the moment a
+    // pending record comes back from a normal login.
+    void pending;
+
     if (!isSuper) {
-      if (pending) {
-        throw new BadRequestError("ACCOUNT_PENDING");
-      }
       if (suspended || state === "suspended") {
         throw new BadRequestError("ACCOUNT_SUSPENDED");
       }
