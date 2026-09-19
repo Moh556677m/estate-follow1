@@ -58,6 +58,31 @@ if [[ "$API_UP" != "1" ]]; then
 fi
 echo "OK: API is accepting connections."
 
+echo "== Verifying ordinary traffic is never rate-limited (regression: the old app-wide globalRateLimit) =="
+# Production incident: a single shared 100-requests/5-minutes counter used
+# to sit in front of EVERY request (assets, auth, everything), so real
+# users doing nothing abnormal — loading a page's assets, a few API calls —
+# got 429'd and shown "حدث خطأ ما" / logged out. That middleware
+# (apps/api/src/middleware/global-rate-limit.js) has been removed entirely
+# in favor of small, endpoint-scoped limiters (OTP, AI extraction, error
+# reporting). Firing well over the old 100-request threshold at a plain,
+# unauthenticated, non-asset-but-otherwise-ordinary endpoint and asserting
+# NONE of them 429 is the real, permanent proof this class of bug cannot
+# come back silently.
+RATE_REGRESSION_FAIL=0
+for i in $(seq 1 120); do
+  code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/hcgi/api/health")
+  if [[ "$code" == "429" ]]; then
+    RATE_REGRESSION_FAIL=1
+    break
+  fi
+done
+if [[ "$RATE_REGRESSION_FAIL" != "0" ]]; then
+  echo "FAIL: got a 429 on ordinary traffic well within a normal usage volume — the global rate-limit regression is back."
+  exit 1
+fi
+echo "OK: 120 rapid ordinary requests, zero 429s."
+
 echo "== Verifying the reverse proxy returns a clean 503 (never a raw ECONNREFUSED) before PocketBase is ready =="
 # This is a best-effort race: PocketBase may already be healthy by the time
 # this runs on a fast CI runner, in which case a 200 is equally correct —

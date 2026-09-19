@@ -96,6 +96,7 @@ const AdminLoginPage = () => {
       else if (code === 'OWNER_PORTAL_ONLY') setError(t('admin_portal_not_authorized'));
       else if (code === 'MAX_SESSIONS' || code === 'MAX_DEVICES') setError(t('err_max_sessions'));
       else if (code === 'INVALID_CREDENTIALS') setError(t('err_invalid_credentials'));
+      else if (code === 'RATE_LIMITED') setError(t('err_rate_limited'));
       // AUTH_ERROR/SESSION_ERROR are NOT credential failures (e.g. a shared
       // rate limit, a transient network/proxy error) — showing them as
       // "incorrect email or password" here was misleading staff into

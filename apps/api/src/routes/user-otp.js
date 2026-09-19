@@ -13,6 +13,7 @@ import rateLimit from 'express-rate-limit';
 import pocketbaseClient from '../utils/pocketbaseClient.js';
 import { sendOtp, verifyOtp, issueResetTicket, consumeResetTicket } from '../utils/userOtp.js';
 import logger from '../utils/logger.js';
+import { rateLimitHandler } from '../middleware/rateLimitLogger.js';
 
 const router = Router();
 
@@ -32,8 +33,12 @@ function isNotUniqueEmailError(err) {
 	return err?.status === 400 && msg.includes('email') && (msg.includes('unique') || msg.includes('taken'));
 }
 
-// Stricter than the app-wide globalRateLimit (100/5min) — an OTP endpoint
-// is exactly the kind of thing brute-forcing/hammering targets first.
+// OTP endpoints are exactly the kind of thing brute-forcing/hammering
+// targets first, so they keep their own dedicated limiters even though the
+// app no longer has a shared global one in front of every request (see
+// main.js — that single shared counter used to block ordinary site
+// traffic, assets and logins site-wide once exhausted, which is why it was
+// removed in favor of small, endpoint-scoped limiters like these).
 //
 // Split into two separate limiters instead of one shared across all 7
 // routes below. One shared limiter meant a normal signup (start + maybe a
@@ -55,7 +60,7 @@ const otpSendRateLimit = rateLimit({
 	standardHeaders: true,
 	legacyHeaders: false,
 	validate: { trustProxy: false },
-	message: { message: 'Too many requests, please try again later.' },
+	handler: rateLimitHandler('otpSendRateLimit', { message: 'Too many requests, please try again later.' }),
 });
 const otpVerifyRateLimit = rateLimit({
 	windowMs: 10 * 60 * 1000,
@@ -63,7 +68,7 @@ const otpVerifyRateLimit = rateLimit({
 	standardHeaders: true,
 	legacyHeaders: false,
 	validate: { trustProxy: false },
-	message: { message: 'Too many requests, please try again later.' },
+	handler: rateLimitHandler('otpVerifyRateLimit', { message: 'Too many requests, please try again later.' }),
 });
 
 // Deliberately simple — just enough to reject obviously-malformed input

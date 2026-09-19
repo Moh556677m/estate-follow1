@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { pocketbaseAuth } from '../middleware/pocketbase-auth.js';
 import pocketbaseClient from '../utils/pocketbaseClient.js';
 import logger from '../utils/logger.js';
+import { rateLimitHandler } from '../middleware/rateLimitLogger.js';
 
 // Task #23 — "مشاكل الموقع" (Site Issues), all three scopes the user
 // confirmed: (1) platform-wide technical/data issues, (2) the same class of
@@ -16,10 +18,24 @@ import logger from '../utils/logger.js';
 // direct PocketBase write token for it. Instead, THIS Express route's public
 // `/report` endpoint is the only way an error reaches the collection from
 // the browser, and it writes through the already-authenticated superuser
-// `pocketbaseClient` (apps/api/src/utils/pocketbaseClient.js). That means
-// error reports automatically inherit this app's existing `globalRateLimit`,
-// `helmet`, and JSON body-size limits (main.js) instead of needing a second,
-// separately-invented abuse-mitigation layer.
+// `pocketbaseClient` (apps/api/src/utils/pocketbaseClient.js).
+//
+// This used to rely on the app-wide `globalRateLimit` (a single shared
+// 100-requests/5-minutes counter in front of literally every request —
+// assets, PocketBase auth, everything) for its abuse protection. That
+// global limiter was removed (see main.js) because it was blocking normal
+// site traffic for real users site-wide — this route now has its own
+// small, scoped limiter instead, matching the OTP routes' pattern
+// (user-otp.js) of one targeted limiter per endpoint rather than one
+// shared counter across the whole app.
+const reportRateLimit = rateLimit({
+	windowMs: 5 * 60 * 1000,
+	max: 30,
+	standardHeaders: true,
+	legacyHeaders: false,
+	validate: { trustProxy: false },
+	handler: rateLimitHandler('reportRateLimit', { error: 'Too many requests, please try again later.' }),
+});
 
 const router = Router();
 const SUPER_ADMIN_EMAIL = 'admin@estatefollow.com';
@@ -81,7 +97,7 @@ export async function logSiteIssue({ source, severity, title, message, details, 
 // (App.jsx) posts here. Only js_error/api_error may originate from a
 // browser — seo/data_integrity findings are only ever written by the scan
 // route below, run by a Super Admin.
-router.post('/report', async (req, res) => {
+router.post('/report', reportRateLimit, async (req, res) => {
 	const body = req.body || {};
 	const source = body.source === 'api_error' ? 'api_error' : 'js_error';
 	if (!body.title && !body.message) {

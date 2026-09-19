@@ -80,6 +80,7 @@ const LoginPage = () => {
       else if (code === 'MAX_SESSIONS' || code === 'MAX_DEVICES') setError(t('err_max_sessions'));
       else if (code === 'SESSION_ERROR') setError(t('something_wrong'));
       else if (code === 'INVALID_CREDENTIALS') setError(t('err_invalid_credentials'));
+      else if (code === 'RATE_LIMITED') setError(t('err_rate_limited'));
       else if (code === 'AUTH_ERROR') setError(t('something_wrong'));
       else setError(t('err_invalid_credentials'));
     } finally {

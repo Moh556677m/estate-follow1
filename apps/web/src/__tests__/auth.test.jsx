@@ -92,11 +92,19 @@ describe('classifyAuthError (PocketBase)', () => {
     );
   });
 
-  it('falls back to AUTH_ERROR (never INVALID_CREDENTIALS) for an unrecognized failure', () => {
+  it('never reports a rate limit as invalid credentials — classifies it as RATE_LIMITED', () => {
     // Regression: this used to be misreported as "wrong password" for ANY
-    // unrecognized error, including a shared rate-limit 429 — see the
-    // AdminLoginPage.jsx / LoginPage.jsx fix this session.
+    // unrecognized error, including a shared rate-limit 429. It now gets
+    // its own distinct code so the UI can show a clear "too many requests"
+    // message instead of either a confusing generic error or (worse) a
+    // false "wrong password" — see LoginPage.jsx / AdminLoginPage.jsx.
     const result = classifyAuthError({ status: 429, message: 'Too many requests, please try again later' });
+    expect(result.code).toBe('RATE_LIMITED');
+    expect(result.code).not.toBe('INVALID_CREDENTIALS');
+  });
+
+  it('falls back to AUTH_ERROR (never INVALID_CREDENTIALS) for a genuinely unrecognized failure', () => {
+    const result = classifyAuthError({ status: 500, message: 'Something exploded' });
     expect(result.code).toBe('AUTH_ERROR');
     expect(result.code).not.toBe('INVALID_CREDENTIALS');
   });

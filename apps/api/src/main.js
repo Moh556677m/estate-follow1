@@ -10,7 +10,6 @@ import { fileURLToPath } from 'url';
 
 import routes from './routes/index.js';
 import { errorMiddleware } from './middleware/error.js';
-import { globalRateLimit } from './middleware/global-rate-limit.js';
 import logger from './utils/logger.js';
 import { BodyLimit } from './constants/common.js';
 import { initSentry } from './utils/sentry.js';
@@ -28,12 +27,14 @@ const __dirname = path.dirname(__filename);
 // Vite build folder: apps/web/dist
 const webDistPath = path.resolve(__dirname, '../../web/dist');
 
-// Self-hosted Hostinger puts exactly one reverse proxy (its platform Node.js
-// app proxy) in front of this server. Trusting only that one hop — instead of
-// `true` (trust the whole X-Forwarded-For chain) — makes req.ip resolve to
-// each visitor's real IP instead of collapsing every visitor onto the same
-// key, which was exhausting globalRateLimit's shared 100-requests/5-minutes
-// budget across ALL traffic and causing "Too many requests" on every request.
+// Exactly one reverse proxy sits in front of this server — Traefik on the
+// VPS (or, previously, self-hosted Hostinger's own platform Node.js app
+// proxy). Trusting only that one hop — instead of `true`, which trusts the
+// whole X-Forwarded-For chain including anything a client itself sends —
+// makes req.ip resolve to each visitor's real IP instead of collapsing
+// every visitor onto the same key. This matters for every per-IP scoped
+// limiter below (and for req.ip-based logic elsewhere), not just one
+// specific middleware.
 app.set('trust proxy', 1);
 
 process.on('uncaughtException', (error) => {
@@ -143,7 +144,20 @@ app.use(
 );
 
 app.use(morgan('combined'));
-app.use(globalRateLimit);
+// No app-wide rate limiter here on purpose. A single shared counter in front
+// of every request (assets, PocketBase auth via the reverse proxy below,
+// every API route) used to block ordinary site traffic for real users once
+// exhausted — one page load's worth of JS/CSS/image/API requests could burn
+// most of the budget on its own, before even counting other visitors that
+// might resolve to the same IP (shared/corporate/mobile-carrier NAT is
+// common). Static assets are never rate-limited at all now. Endpoints that
+// actually need abuse protection (OTP send/verify, error reporting, the AI
+// extraction endpoint) each have their own small, endpoint-scoped limiter
+// instead — see user-otp.js, site-issues.js, integrated-ai-rate-limit.js.
+// Login brute-force protection lives in PocketBase itself (settings.rateLimits
+// + the *:auth rule), scoped per real client IP via trustedProxy, since
+// auth-with-password is proxied straight through to PocketBase below and
+// never passes through an Express route that could inspect it.
 
 // --- PocketBase reverse proxy (self-host routing fix) ----------------------
 // The frontend calls PocketBase through the relative path `/hcgi/platform/*`

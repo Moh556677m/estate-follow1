@@ -17,9 +17,10 @@
  * layer (apps/api/src/routes/site-issues.js) is what accepts PUBLIC error
  * reports and writes them here using its already-authenticated superuser
  * PocketBase client (apps/api/src/utils/pocketbaseClient.js) — this
- * collection itself never grants an anonymous visitor direct write access,
- * so it inherits the Express app's existing `globalRateLimit`/helmet/body-
- * size protections instead of needing a second, separately-invented set.
+ * collection itself never grants an anonymous visitor direct write access.
+ * The `/report` route has its own dedicated rate limiter (see
+ * apps/api/src/routes/site-issues.js) on top of Express's helmet/body-size
+ * protections.
  */
 migrate(
   (app) => {

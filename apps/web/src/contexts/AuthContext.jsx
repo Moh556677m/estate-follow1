@@ -51,6 +51,7 @@ export function classifyAuthError(err) {
       'AUTH_ERROR',
       'STAFF_PORTAL_ONLY',
       'OWNER_PORTAL_ONLY',
+      'RATE_LIMITED',
     ];
     if (known.includes(err.code)) return err;
   }
@@ -89,6 +90,14 @@ export function classifyAuthError(err) {
   }
   if (blob.includes('owner_portal_only')) {
     return authError('OWNER_PORTAL_ONLY', msg);
+  }
+
+  // A rate limit is never a credential failure and must never be reported
+  // as one (it used to fall through to AUTH_ERROR -> the generic "something
+  // went wrong" message, which is honest but doesn't tell the user WHY —
+  // and a caller must never react to this by clearing the session).
+  if (err?.status === 429 || blob.includes('too many requests')) {
+    return authError('RATE_LIMITED', msg);
   }
 
   // Only pure credential failures — do NOT use bare status===400 (session
