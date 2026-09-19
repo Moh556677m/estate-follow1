@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import morgan from 'morgan';
 import path from 'path';
 import http from 'http';
@@ -142,6 +143,19 @@ app.use(
     allowedHeaders: ['Authorization', 'Content-Type', 'X-Portal'],
   }),
 );
+
+// gzip/deflate every compressible response — the built-in JS bundle alone
+// is ~940KB raw (~283KB gzipped, per the real build output), and nothing
+// in this app was ever compressing it or any other text response (JSON,
+// CSS, HTML) before this: it was going out over the wire completely
+// uncompressed on every single page load, which is a real, direct cause of
+// "loading takes a long time" independent of anything else. `compression`
+// decides per-response via Content-Type (its default `compressible`
+// check), so it already skips already-compressed binary formats on its
+// own (images, PDFs, video) — including the large PocketBase file
+// downloads proxied below — there is nothing to gain and real CPU cost to
+// lose by re-compressing those, so no extra filter is added here.
+app.use(compression());
 
 app.use(morgan('combined'));
 // No app-wide rate limiter here on purpose. A single shared counter in front

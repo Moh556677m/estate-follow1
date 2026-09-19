@@ -58,6 +58,21 @@ if [[ "$API_UP" != "1" ]]; then
 fi
 echo "OK: API is accepting connections."
 
+echo "== Verifying text responses are actually gzip-compressed (real page-load speed) =="
+# Nothing in this app compressed any response before this — the built JS
+# bundle alone is ~940KB raw vs ~283KB gzipped, uncompressed on every page
+# load. Tests a real, large built JS asset (compression's default 1KB
+# threshold means a tiny JSON response like /health would never compress
+# regardless of whether the middleware works, so that would be the wrong
+# thing to test against) against a real booted server.
+REAL_ASSET="$(basename "$(ls apps/web/dist/assets/*.js | head -n 1)")"
+CONTENT_ENCODING=$(curl -sS -H 'Accept-Encoding: gzip' -o /dev/null -D - "$BASE_URL/assets/$REAL_ASSET" | grep -i '^content-encoding:' || true)
+if [[ -z "$CONTENT_ENCODING" ]]; then
+  echo "FAIL: $REAL_ASSET was not compressed even though the client sent Accept-Encoding: gzip."
+  exit 1
+fi
+echo "OK: static JS assets are compressed ($CONTENT_ENCODING)."
+
 echo "== Verifying ordinary traffic is never rate-limited (regression: the old app-wide globalRateLimit) =="
 # Production incident: a single shared 100-requests/5-minutes counter used
 # to sit in front of EVERY request (assets, auth, everything), so real
