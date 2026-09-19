@@ -120,6 +120,23 @@ if [[ "$OTP_STATUS" != "400" ]]; then
 fi
 echo "OK: the OTP endpoint fails cleanly on bad input ($OTP_STATUS)."
 
+echo "== Verifying the AI Add Property status route boots cleanly under the real entrypoint =="
+# This route (apps/api/src/routes/integrated-ai.js) is what the Docker/VPS
+# move could plausibly have broken — a route-mounting/middleware-order
+# regression, not the OpenAI/Gemini calls themselves (those need real
+# provider keys this CI environment never has, so they cannot be exercised
+# here). No key is configured in this environment, so a clean
+# configured:false is the correct, healthy response — a 404/500 here would
+# mean the route failed to mount under server.cjs's real entrypoint.
+AI_STATUS_CODE=$(curl -sS -o /tmp/ai-status.json -w '%{http_code}' "$BASE_URL/hcgi/api/integrated-ai/plan-status")
+if [[ "$AI_STATUS_CODE" != "200" ]]; then
+  echo "FAIL: /integrated-ai/plan-status did not respond cleanly (status $AI_STATUS_CODE)."
+  cat /tmp/ai-status.json
+  exit 1
+fi
+echo "OK: AI Add Property status route responds ($AI_STATUS_CODE)."
+cat /tmp/ai-status.json
+
 echo "== Verifying a freshly-created signup placeholder (pending_signup=true) can immediately log in =="
 # Regression guard for a real production deadlock: routes/user-otp.js's
 # /signup/verify creates the user record with pending_signup=true by design
