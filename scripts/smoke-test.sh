@@ -158,6 +158,36 @@ if [[ "$PENDING_LOGIN_STATUS" != "200" ]]; then
 fi
 echo "OK: a freshly-created signup placeholder can authenticate immediately (no deadlock)."
 
+echo "== Verifying an owner identity-document upload larger than the OLD 10MB cap now succeeds =="
+# Regression guard for a real production bug: passport_file/residence_file/
+# document_file/user_additional_documents.file were all created with
+# maxSize: 10485760 (10MB) — a real scanned passport/residence PDF
+# routinely exceeds that, and PocketBase rejected the request before it
+# ever reached the frontend's own generic "تعذر رفع الملف" message. Proves
+# an ~15MB file (bigger than the old cap, well under the new 100MB one)
+# uploads successfully to a real PocketBase instance with the real
+# migration applied — not just that the migration file has valid syntax.
+OWNER_TOKEN=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pending-login.json','utf8')).token)")
+OWNER_ID=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pending-login.json','utf8')).record.id)")
+LARGE_PDF="$TMP_DATA_DIR/large-test.pdf"
+node -e "
+const fs = require('fs');
+const header = Buffer.from('%PDF-1.4\n');
+const filler = Buffer.alloc(15 * 1024 * 1024, 0x41);
+fs.writeFileSync('$LARGE_PDF', Buffer.concat([header, filler]));
+"
+LARGE_UPLOAD_STATUS=$(curl -sS -o /tmp/large-upload.json -w '%{http_code}' \
+  -X PATCH "$BASE_URL/hcgi/platform/api/collections/users/records/$OWNER_ID" \
+  -H "Authorization: $OWNER_TOKEN" \
+  -F "passport_file=@$LARGE_PDF;type=application/pdf" \
+  -F "passport_number=A1234567")
+if [[ "$LARGE_UPLOAD_STATUS" != "200" ]]; then
+  echo "FAIL: a ~15MB identity-document upload was rejected (status $LARGE_UPLOAD_STATUS) — the 10MB cap regression is back."
+  cat /tmp/large-upload.json
+  exit 1
+fi
+echo "OK: a ~15MB passport upload succeeds against the real PocketBase instance."
+
 echo "== Verifying SIGTERM shuts down gracefully with no orphaned PocketBase process =="
 kill -TERM "$SERVER_PID"
 for i in $(seq 1 10); do
