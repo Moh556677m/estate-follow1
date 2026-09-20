@@ -153,17 +153,13 @@ async function checkAdminSidebar(browser) {
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
-  const t0 = Date.now();
   const consoleErrors = [];
   page.on('console', (msg) => {
-    if (msg.type() === 'error') {
-      consoleErrors.push(msg.text());
-      console.log(`[EFDEBUG t+${Date.now() - t0}ms] console.error: ${msg.text().slice(0, 300)}`);
-    }
+    if (msg.type() === 'error' && !isBenignConsoleMessage(msg.text())) consoleErrors.push(msg.text());
   });
   page.on('pageerror', (err) => {
-    consoleErrors.push(String(err));
-    console.log(`[EFDEBUG t+${Date.now() - t0}ms] pageerror: ${String(err).slice(0, 300)}`);
+    const text = String(err);
+    if (!isBenignConsoleMessage(text)) consoleErrors.push(text);
   });
 
   await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle', timeout: 30000 });
@@ -203,21 +199,38 @@ async function checkAdminSidebar(browser) {
     ok('The admin sidebar accepts pointer events.');
   }
 
-  // The real regression test: click an actual sidebar link and require
-  // real navigation. A frozen sidebar would leave the URL unchanged.
+  // The real regression test: click an actual sidebar link and require real
+  // navigation. A frozen sidebar would leave the URL unchanged.
+  //
+  // Regression (false positive, root-caused via temporary timestamped CI
+  // diagnostics): this used to always click the FIRST matching link
+  // (`.first()`) without checking where it actually pointed. The admin
+  // dashboard's first sidebar item is "Overview", i.e. /admin/overview —
+  // exactly the page /admin/login already redirects to after a successful
+  // login. Clicking a link to the page you are ALREADY on correctly does
+  // not change the URL; that is not a frozen sidebar, it's clicking a link
+  // to here. This was never a real freeze — it was this test clicking the
+  // one link guaranteed to look like a no-op. Now picks the first link
+  // that actually points somewhere else.
   const beforeUrl = page.url();
-  const firstLink = sidebar.locator('a[href^="/admin/"]').first();
-  const hasLink = await firstLink.count();
-  if (!hasLink) {
-    fail('No clickable section links were found in the admin sidebar.');
+  const links = sidebar.locator('a[href^="/admin/"]');
+  const linkCount = await links.count();
+  let targetLink = null;
+  for (let i = 0; i < linkCount; i += 1) {
+    const candidate = links.nth(i);
+    // eslint-disable-next-line no-await-in-loop
+    const href = await candidate.getAttribute('href');
+    if (href && !beforeUrl.endsWith(href)) {
+      targetLink = candidate;
+      break;
+    }
+  }
+  if (!targetLink) {
+    fail('No sidebar link pointing to a different section was found (cannot test real navigation).');
   } else {
-    const targetHref = await firstLink.getAttribute('href').catch(() => null);
-    console.log(`[EFDEBUG t+${Date.now() - t0}ms] about to click sidebar link href=${targetHref} beforeUrl=${beforeUrl}`);
-    await firstLink.click({ timeout: 10000 });
-    console.log(`[EFDEBUG t+${Date.now() - t0}ms] click() returned`);
+    await targetLink.click({ timeout: 10000 });
     await page.waitForTimeout(500);
     const afterUrl = page.url();
-    console.log(`[EFDEBUG t+${Date.now() - t0}ms] afterUrl=${afterUrl}`);
     if (afterUrl === beforeUrl) {
       fail('Clicking a sidebar link did not navigate anywhere — the sidebar is frozen.');
     } else {

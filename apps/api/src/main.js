@@ -92,6 +92,15 @@ app.use(
           'https://cdn.onesignal.com', // OneSignal push-notification SDK
           'https://api.onesignal.com', // OneSignal's own JSONP-style sync call (loaded as a <script>, not fetch)
           'https://www.google.com', // reCAPTCHA v3 (login/signup/forgot-password)
+          // reCAPTCHA v3's bootstrap script (www.google.com/recaptcha/api.js)
+          // loads its actual renderer from gstatic.com — missing this made
+          // every login/signup/forgot-password submit block on the module's
+          // own 10s absolute fail-open timeout (recaptcha.js) instead of
+          // getting a real token quickly, on every single attempt. Confirmed
+          // live via CI console capture: "Loading the script
+          // 'https://www.gstatic.com/recaptcha/releases/.../recaptcha__en.js'
+          // violates the following Content Security Policy directive".
+          'https://www.gstatic.com',
         ],
         connectSrc: [
           "'self'",
@@ -110,6 +119,7 @@ app.use(
           // them individually is not possible; only a wildcard covers it.
           'https://*.clarity.ms',
           'https://www.google.com', // reCAPTCHA v3's own token verification calls
+          'https://www.gstatic.com', // reCAPTCHA v3's renderer script + its own internal calls
         ],
         styleSrc: [
           "'self'",
