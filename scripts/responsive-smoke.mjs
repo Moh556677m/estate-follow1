@@ -153,11 +153,18 @@ async function checkAdminSidebar(browser) {
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
+  const t0 = Date.now();
   const consoleErrors = [];
   page.on('console', (msg) => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text());
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text());
+      console.log(`[EFDEBUG t+${Date.now() - t0}ms] console.error: ${msg.text().slice(0, 300)}`);
+    }
   });
-  page.on('pageerror', (err) => consoleErrors.push(String(err)));
+  page.on('pageerror', (err) => {
+    consoleErrors.push(String(err));
+    console.log(`[EFDEBUG t+${Date.now() - t0}ms] pageerror: ${String(err).slice(0, 300)}`);
+  });
 
   await page.goto(`${BASE_URL}/admin/login`, { waitUntil: 'networkidle', timeout: 30000 });
   await page.fill('#admin-email', admin.email);
@@ -204,9 +211,13 @@ async function checkAdminSidebar(browser) {
   if (!hasLink) {
     fail('No clickable section links were found in the admin sidebar.');
   } else {
+    const targetHref = await firstLink.getAttribute('href').catch(() => null);
+    console.log(`[EFDEBUG t+${Date.now() - t0}ms] about to click sidebar link href=${targetHref} beforeUrl=${beforeUrl}`);
     await firstLink.click({ timeout: 10000 });
+    console.log(`[EFDEBUG t+${Date.now() - t0}ms] click() returned`);
     await page.waitForTimeout(500);
     const afterUrl = page.url();
+    console.log(`[EFDEBUG t+${Date.now() - t0}ms] afterUrl=${afterUrl}`);
     if (afterUrl === beforeUrl) {
       fail('Clicking a sidebar link did not navigate anywhere — the sidebar is frozen.');
     } else {
